@@ -1,0 +1,20 @@
+{
+  "name": "raddir",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A modern, self-hostable, privacy-first voice platform",
+  "scripts": {
+    "dev:server": "pnpm --filter @raddir/server dev",
+    "dev:client": "pnpm --filter @raddir/client dev",
+    "build:shared": "pnpm --filter @raddir/shared build",
+    "build:server": "pnpm --filter @raddir/server build",
+    "build:client": "pnpm --filter @raddir/client build",
+    "build": "pnpm build:shared && pnpm build:server && pnpm build:client",
+    "lint": "eslint packages/*/src --ext .ts,.tsx",
+    "clean": "pnpm -r exec rm -rf dist node_modules"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

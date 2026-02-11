@@ -1,0 +1,30 @@
+{
+  "name": "@raddir/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@raddir/shared": "workspace:*",
+    "mediasoup": "^3.14.0",
+    "ws": "^8.18.0",
+    "fastify": "^5.2.0",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.0",
+    "nanoid": "^5.0.0",
+    "argon2": "^0.41.0",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0"
+  }
+}

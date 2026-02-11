@@ -1,0 +1,23 @@
+services:
+  raddir:
+    build: .
+    container_name: raddir
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+      - "40000-40100:40000-40100/udp"
+    environment:
+      - RADDIR_HOST=0.0.0.0
+      - RADDIR_PORT=4000
+      - RADDIR_DB_PATH=/data/raddir.db
+      - RADDIR_RTC_MIN_PORT=40000
+      - RADDIR_RTC_MAX_PORT=40100
+      - RADDIR_ANNOUNCED_IP=${RADDIR_ANNOUNCED_IP:-}
+      - RADDIR_ADMIN_TOKEN=${RADDIR_ADMIN_TOKEN:-}
+      - RADDIR_LOG_LEVEL=${RADDIR_LOG_LEVEL:-info}
+    volumes:
+      - raddir-data:/data
+    network_mode: host  # Recommended for WebRTC UDP performance
+
+volumes:
+  raddir-data:
