@@ -10,6 +10,13 @@
     "build:server": "pnpm --filter @raddir/server build",
     "build:client": "pnpm --filter @raddir/client build",
     "build": "pnpm build:shared && pnpm build:server && pnpm build:client",
+    "docker:build": "docker build -f Dockerfile.server -t raddir-server .",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "electron:build": "pnpm build:shared && pnpm --filter @raddir/client electron:build",
+    "electron:build:win": "pnpm build:shared && pnpm --filter @raddir/client electron:build:win",
+    "electron:build:mac": "pnpm build:shared && pnpm --filter @raddir/client electron:build:mac",
+    "electron:build:linux": "pnpm build:shared && pnpm --filter @raddir/client electron:build:linux",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
     "clean": "pnpm -r exec rm -rf dist node_modules"
   },

@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-electron
+*.db
+*.db-journal
+.env
+.git
+.gitignore
+README.md
+docs/
+packages/client/

@@ -10,3 +10,5 @@ Thumbs.db
 coverage/
 .turbo/
 out/
+release/
+dist-electron/

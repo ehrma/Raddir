@@ -17,10 +17,24 @@ let audioContext: AudioContext | null = null;
 let mediaReady = false;
 let pendingProducers: Array<{ producerId: string; userId: string }> = [];
 
+/** Get the live audio context (available when in a voice channel) */
+export function getLiveAudioContext(): AudioContext | null {
+  return audioContext;
+}
+
+/** Get the live mic stream (available when in a voice channel) */
+export function getLiveStream(): MediaStream | null {
+  return localStream;
+}
+
 export function useAudio() {
   const { currentChannelId, userId } = useServerStore();
   const { isMuted, isDeafened, isPttActive, setSpeaking, setUserSpeaking } = useVoiceStore();
-  const { inputDeviceId, outputDeviceId, voiceActivation, vadThreshold, pttKey } = useSettingsStore();
+  const inputDeviceId = useSettingsStore((s) => s.inputDeviceId);
+  const outputDeviceId = useSettingsStore((s) => s.outputDeviceId);
+  const voiceActivation = useSettingsStore((s) => s.voiceActivation);
+  const vadThreshold = useSettingsStore((s) => s.vadThreshold);
+  const pttKey = useSettingsStore((s) => s.pttKey);
   const prevChannelRef = useRef<string | null>(null);
   const prevMutedRef = useRef(false);
   const prevDeafenedRef = useRef(false);
@@ -246,27 +260,25 @@ export function useAudio() {
       localStream = newStream;
 
       // Re-setup VAD on new stream
-      if (voiceActivation && audioContext) {
+      const { voiceActivation: va, vadThreshold: vt } = useSettingsStore.getState();
+      if (va && audioContext) {
         vad?.stop();
         const source = audioContext.createMediaStreamSource(newStream);
-        vad = new VoiceActivityDetector(audioContext, source, vadThreshold);
+        vad = new VoiceActivityDetector(audioContext, source, vt);
         vad.start((speaking) => {
-          setSpeaking(speaking);
+          useVoiceStore.getState().setSpeaking(speaking);
           const currentUserId = useServerStore.getState().userId;
           if (currentUserId) {
             useVoiceStore.getState().setUserSpeaking(currentUserId, speaking);
           }
-          if (speaking) {
-            mediaClient?.resumeProducer();
-          } else {
-            mediaClient?.pauseProducer();
-          }
+          const signaling = getSignalingClient();
+          signaling?.send({ type: "speaking", speaking });
         });
       }
     } catch (err) {
       console.error("[audio] Failed to switch input device:", err);
     }
-  }, [voiceActivation, vadThreshold, setSpeaking]);
+  }, []);
 
   // Watch for input device changes
   useEffect(() => {
@@ -276,7 +288,7 @@ export function useAudio() {
   }, [inputDeviceId, switchInputDevice]);
 
   // Master output volume
-  const { outputVolume } = useSettingsStore();
+  const outputVolume = useSettingsStore((s) => s.outputVolume);
   useEffect(() => {
     mediaClient?.setMasterVolume(outputVolume);
   }, [outputVolume]);

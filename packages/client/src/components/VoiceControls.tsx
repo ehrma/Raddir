@@ -10,7 +10,7 @@ import { AdminPanel } from "./AdminPanel";
 
 export function VoiceControls() {
   const { isMuted, isDeafened, toggleMute, toggleDeafen } = useVoiceStore();
-  const { nickname } = useSettingsStore();
+  const nickname = useSettingsStore((s) => s.nickname);
   const { disconnect } = useConnection();
   const { isAdmin } = usePermissions();
   const [showSettings, setShowSettings] = useState(false);

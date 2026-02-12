@@ -39,6 +39,9 @@ function createWindow(): void {
   });
 }
 
+// Accept self-signed TLS certificates (Raddir server generates one automatically)
+app.commandLine.appendSwitch("ignore-certificate-errors");
+
 app.whenReady().then(() => {
   createWindow();
 

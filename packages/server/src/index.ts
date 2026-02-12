@@ -1,5 +1,5 @@
-import { createServer } from "node:http";
 import Fastify from "fastify";
+import { dirname } from "node:path";
 import { loadConfig } from "./config.js";
 import { initDb, closeDb } from "./db/database.js";
 import { createWorkerPool, closeWorkerPool } from "./media/worker-pool.js";
@@ -12,6 +12,7 @@ import { serverRoutes } from "./api/routes/servers.js";
 import { channelRoutes } from "./api/routes/channels.js";
 import { inviteRoutes } from "./api/routes/invites.js";
 import { roleRoutes } from "./api/routes/roles.js";
+import { getTlsConfig, scheduleRenewal, type TlsMode, type TlsOptions } from "./tls.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -36,11 +37,38 @@ async function main(): Promise<void> {
   initTransportConfig(config);
   console.log("[raddir] Media workers ready");
 
-  // Create Fastify instance with raw Node HTTP server
+  // Get TLS certificate
+  const dataDir = dirname(config.dbPath);
+  const tlsOpts: TlsOptions = {
+    mode: config.tlsMode as TlsMode,
+    dataDir,
+    domain: config.tlsDomain || undefined,
+    email: config.tlsEmail || undefined,
+    certPath: config.tlsCert || undefined,
+    keyPath: config.tlsKey || undefined,
+  };
+  console.log(`[raddir] TLS mode: ${tlsOpts.mode}`);
+  const tls = await getTlsConfig(tlsOpts);
+
+  // Create Fastify instance with HTTPS
   const fastify = Fastify({
     logger: {
       level: config.logLevel,
     },
+    https: {
+      cert: tls.cert,
+      key: tls.key,
+    },
+  });
+
+  // Schedule automatic certificate renewal for Let's Encrypt
+  scheduleRenewal(tlsOpts, (newTls) => {
+    // Node's tls.Server exposes setSecureContext to hot-swap certs without restart
+    const srv = fastify.server as any;
+    if (typeof srv.setSecureContext === "function") {
+      srv.setSecureContext({ cert: newTls.cert, key: newTls.key });
+      console.log("[raddir] TLS certificate renewed and applied");
+    }
   });
 
   // Health check endpoint
@@ -73,8 +101,8 @@ async function main(): Promise<void> {
   const httpServer = fastify.server;
   setupSignaling(httpServer, config);
 
-  console.log(`[raddir] Server listening on ${config.host}:${config.port}`);
-  console.log(`[raddir] WebSocket signaling available at ws://${config.host}:${config.port}/ws`);
+  console.log(`[raddir] Server listening on https://${config.host}:${config.port}`);
+  console.log(`[raddir] WebSocket signaling available at wss://${config.host}:${config.port}/ws`);
 
   // Graceful shutdown
   const shutdown = async () => {

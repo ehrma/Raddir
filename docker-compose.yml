@@ -1,23 +1,33 @@
 services:
   raddir:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.server
     container_name: raddir
     restart: unless-stopped
     ports:
       - "4000:4000"
+      - "80:80"              # Required for Let's Encrypt ACME challenge (only used during cert issuance)
       - "40000-40100:40000-40100/udp"
     environment:
       - RADDIR_HOST=0.0.0.0
       - RADDIR_PORT=4000
-      - RADDIR_DB_PATH=/data/raddir.db
+      - RADDIR_DB_PATH=/app/data/raddir.db
       - RADDIR_RTC_MIN_PORT=40000
       - RADDIR_RTC_MAX_PORT=40100
       - RADDIR_ANNOUNCED_IP=${RADDIR_ANNOUNCED_IP:-}
       - RADDIR_ADMIN_TOKEN=${RADDIR_ADMIN_TOKEN:-}
+      - RADDIR_PASSWORD=${RADDIR_PASSWORD:-}
+      - RADDIR_TLS_MODE=${RADDIR_TLS_MODE:-selfsigned}
+      - RADDIR_TLS_DOMAIN=${RADDIR_TLS_DOMAIN:-}
+      - RADDIR_TLS_EMAIL=${RADDIR_TLS_EMAIL:-}
+      - RADDIR_TLS_CERT=${RADDIR_TLS_CERT:-}
+      - RADDIR_TLS_KEY=${RADDIR_TLS_KEY:-}
       - RADDIR_LOG_LEVEL=${RADDIR_LOG_LEVEL:-info}
     volumes:
-      - raddir-data:/data
-    network_mode: host  # Recommended for WebRTC UDP performance
+      - raddir-data:/app/data
+    # Uncomment for better WebRTC UDP performance (replaces ports mapping):
+    # network_mode: host
 
 volumes:
   raddir-data:

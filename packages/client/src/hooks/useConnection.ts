@@ -32,7 +32,8 @@ export function useConnection() {
   const [error, setError] = useState<string | null>(null);
   const [kickReason, setKickReason] = useState<string | null>(null);
   const [banReason, setBanReason] = useState<string | null>(null);
-  const { serverUrl, nickname } = useSettingsStore();
+  const serverUrl = useSettingsStore((s) => s.serverUrl);
+  const nickname = useSettingsStore((s) => s.nickname);
   const store = useServerStore;
 
   const connect = useCallback(async () => {

@@ -5,11 +5,11 @@ export class VoiceActivityDetector {
   private speaking = false;
   private silenceFrames = 0;
   private speechFrames = 0;
-  // ~1.5 seconds of silence before cutting off (at 60fps)
+  // ~1.5 seconds of silence before cutting off (at ~60 ticks/s)
   private readonly silenceDelay = 90;
   // Require 2 consecutive speech frames to trigger (prevents transient clicks)
   private readonly speechOnset = 2;
-  private rafId: number | null = null;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
   private onSpeakingChange?: (speaking: boolean) => void;
 
   constructor(audioContext: AudioContext, source: MediaStreamAudioSourceNode, threshold = -50) {
@@ -23,13 +23,15 @@ export class VoiceActivityDetector {
 
   start(callback: (speaking: boolean) => void): void {
     this.onSpeakingChange = callback;
-    this.tick();
+    // Use setInterval instead of requestAnimationFrame so VAD keeps
+    // running when the Electron window is unfocused or minimized
+    this.intervalId = setInterval(this.tick, 16); // ~60 Hz
   }
 
   stop(): void {
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
     }
     if (this.speaking) {
       this.speaking = false;
@@ -39,6 +41,10 @@ export class VoiceActivityDetector {
 
   setThreshold(threshold: number): void {
     this.threshold = threshold;
+    // Reset counters so a threshold change during speech doesn't
+    // cause a false silence detection from stale frame counts
+    this.silenceFrames = 0;
+    this.speechFrames = 0;
   }
 
   private tick = (): void => {
@@ -66,7 +72,5 @@ export class VoiceActivityDetector {
         this.onSpeakingChange?.(false);
       }
     }
-
-    this.rafId = requestAnimationFrame(this.tick);
   };
 }

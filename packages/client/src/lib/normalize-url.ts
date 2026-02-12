@@ -24,7 +24,7 @@ export function normalizeServerUrl(input: string): string {
   // Strip http(s):// if someone pastes that
   url = url.replace(/^https?:\/\//, "");
 
-  // Determine scheme: localhost/127.x/192.x/10.x → ws://, otherwise wss://
+  // Use ws:// for local addresses, wss:// for everything else (server has built-in TLS)
   const isLocal =
     url.startsWith("localhost") ||
     url.startsWith("127.") ||

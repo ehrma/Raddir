@@ -18,6 +18,11 @@ export interface RaddirConfig {
   password: string;
   logLevel: string;
   mediaWorkers: number;
+  tlsMode: string;
+  tlsCert: string;
+  tlsKey: string;
+  tlsDomain: string;
+  tlsEmail: string;
 }
 
 function loadConfigFile(): Partial<RaddirConfig> {
@@ -48,5 +53,10 @@ export function loadConfig(): RaddirConfig {
     password: process.env.RADDIR_PASSWORD ?? file.password ?? "",
     logLevel: process.env.RADDIR_LOG_LEVEL ?? file.logLevel ?? "info",
     mediaWorkers: parseInt(process.env.RADDIR_MEDIA_WORKERS ?? "", 10) || (file.mediaWorkers ?? cpus),
+    tlsMode: process.env.RADDIR_TLS_MODE ?? file.tlsMode ?? "selfsigned",
+    tlsCert: process.env.RADDIR_TLS_CERT ?? file.tlsCert ?? "",
+    tlsKey: process.env.RADDIR_TLS_KEY ?? file.tlsKey ?? "",
+    tlsDomain: process.env.RADDIR_TLS_DOMAIN ?? file.tlsDomain ?? "",
+    tlsEmail: process.env.RADDIR_TLS_EMAIL ?? file.tlsEmail ?? "",
   };
 }

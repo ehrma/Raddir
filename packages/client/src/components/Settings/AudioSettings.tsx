@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { getLiveAudioContext, getLiveStream } from "../../hooks/useAudio";
 import { Volume2, Mic, AudioLines, Activity } from "lucide-react";
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
@@ -153,43 +154,66 @@ export function AudioSettings() {
 }
 
 function MicTest() {
-  const { inputDeviceId, noiseSuppression, echoCancellation, autoGainControl, vadThreshold, voiceActivation } = useSettingsStore();
+  const inputDeviceId = useSettingsStore((s) => s.inputDeviceId);
+  const noiseSuppression = useSettingsStore((s) => s.noiseSuppression);
+  const echoCancellation = useSettingsStore((s) => s.echoCancellation);
+  const autoGainControl = useSettingsStore((s) => s.autoGainControl);
+  const voiceActivation = useSettingsStore((s) => s.voiceActivation);
+  const vadThreshold = useSettingsStore((s) => s.vadThreshold);
   const [testing, setTesting] = useState(false);
   const [levelDb, setLevelDb] = useState(-Infinity);
   const [speaking, setSpeaking] = useState(false);
-  const streamRef = useRef<MediaStream | null>(null);
-  const ctxRef = useRef<AudioContext | null>(null);
-  const rafRef = useRef<number>(0);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+
+  // All mutable state lives in a single ref to survive React StrictMode
+  // remounts without accidentally killing the live audio pipeline
+  const stateRef = useRef<{
+    interval: ReturnType<typeof setInterval> | null;
+    ownStream: MediaStream | null;
+    ownCtx: AudioContext | null;
+    lastUiUpdate: number;
+  }>({ interval: null, ownStream: null, ownCtx: null, lastUiUpdate: 0 });
 
   const startTest = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: inputDeviceId !== "default" ? { exact: inputDeviceId } : undefined,
-          echoCancellation,
-          noiseSuppression,
-          autoGainControl,
-          sampleRate: 48000,
-          channelCount: 1,
-        },
-      });
+    // Already running — don't start a second one
+    if (stateRef.current.interval) return;
 
-      const ctx = new AudioContext({ sampleRate: 48000 });
+    try {
+      // Reuse the live audio context & stream if already in a voice channel
+      // to avoid a second getUserMedia which starves the mic on Windows
+      let ctx = getLiveAudioContext();
+      let stream = getLiveStream();
+
+      if (!ctx || !stream) {
+        // Not in a channel — create our own
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: inputDeviceId !== "default" ? { exact: inputDeviceId } : undefined,
+            echoCancellation,
+            noiseSuppression,
+            autoGainControl,
+            sampleRate: 48000,
+            channelCount: 1,
+          },
+        });
+        ctx = new AudioContext({ sampleRate: 48000 });
+        if (ctx.state === "suspended") await ctx.resume();
+        ctx.addEventListener("statechange", () => {
+          if (ctx!.state === "suspended") ctx!.resume().catch(() => {});
+        });
+        stateRef.current.ownStream = stream;
+        stateRef.current.ownCtx = ctx;
+      }
+
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
       source.connect(analyser);
 
-      streamRef.current = stream;
-      ctxRef.current = ctx;
-      analyserRef.current = analyser;
-      setTesting(true);
-
       const dataArray = new Float32Array(analyser.fftSize);
 
-      const tick = () => {
+      stateRef.current.interval = setInterval(() => {
+        if (ctx!.state !== "running") return;
         analyser.getFloatTimeDomainData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) {
@@ -197,33 +221,49 @@ function MicTest() {
         }
         const rms = Math.sqrt(sum / dataArray.length);
         const db = rms > 0 ? 20 * Math.log10(rms) : -100;
-        setLevelDb(db);
-        setSpeaking(db > useSettingsStore.getState().vadThreshold);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
+
+        const now = performance.now();
+        if (now - stateRef.current.lastUiUpdate > 50) {
+          stateRef.current.lastUiUpdate = now;
+          setLevelDb(db);
+          setSpeaking(db > useSettingsStore.getState().vadThreshold);
+        }
+      }, 16);
+
+      setTesting(true);
     } catch (err) {
       console.error("[mic-test] Failed to start:", err);
     }
   }, [inputDeviceId, echoCancellation, noiseSuppression, autoGainControl]);
 
   const stopTest = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    if (streamRef.current) {
-      for (const track of streamRef.current.getTracks()) track.stop();
-      streamRef.current = null;
+    if (stateRef.current.interval !== null) {
+      clearInterval(stateRef.current.interval);
+      stateRef.current.interval = null;
     }
-    ctxRef.current?.close().catch(() => {});
-    ctxRef.current = null;
-    analyserRef.current = null;
+    // Only stop resources we own (never the live channel's stream/context)
+    if (stateRef.current.ownStream) {
+      for (const track of stateRef.current.ownStream.getTracks()) track.stop();
+      stateRef.current.ownStream = null;
+    }
+    if (stateRef.current.ownCtx) {
+      stateRef.current.ownCtx.close().catch(() => {});
+      stateRef.current.ownCtx = null;
+    }
     setTesting(false);
     setLevelDb(-Infinity);
     setSpeaking(false);
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — safe because stateRef persists across StrictMode remounts
   useEffect(() => {
-    return () => { if (testing) stopTest(); };
+    return () => {
+      // Only clean up the interval; don't touch audio resources during
+      // StrictMode remounts — they'll be reused if the component remounts
+      if (stateRef.current.interval !== null) {
+        clearInterval(stateRef.current.interval);
+      }
+    };
   }, []);
 
   // Map dB to percentage for the bar (range: -60 to 0 dB)
@@ -236,16 +276,14 @@ function MicTest() {
         Test your microphone and dial in the voice activation threshold. The green bar shows your current mic level.
       </p>
 
-      <button
-        onClick={testing ? stopTest : startTest}
-        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-          testing
-            ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
-            : "bg-accent/20 text-accent hover:bg-accent/30"
-        }`}
-      >
-        {testing ? "Stop Test" : "Start Mic Test"}
-      </button>
+      {!testing && (
+        <button
+          onClick={startTest}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-accent/20 text-accent hover:bg-accent/30"
+        >
+          Start Mic Test
+        </button>
+      )}
 
       {testing && (
         <div className="space-y-2">
@@ -288,6 +326,13 @@ function MicTest() {
               </span>
             </div>
           )}
+
+          <button
+            onClick={stopTest}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-red-500/20 text-red-400 hover:bg-red-500/30"
+          >
+            Stop Test
+          </button>
         </div>
       )}
     </div>

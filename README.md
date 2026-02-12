@@ -2,7 +2,7 @@
 
 **A modern, self-hostable, privacy-first voice platform for groups that take communication seriously.**
 
-Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end encryption. The server **cannot** read your voice or text content — only metadata (who, when, where) is visible.
+Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end encryption. The server **cannot** read your voice or text content — only metadata (who, when, where) is visible. All dependencies are open source (MIT/ISC/Apache 2.0).
 
 ## Features
 
@@ -19,13 +19,17 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 ### Security & Privacy
 - **End-to-end encrypted voice** — AES-256-GCM via Insertable Streams; server is cryptographically blind
 - **End-to-end encrypted text chat** — Messages encrypted client-side before transmission
-- **Persistent Ed25519 identity** — Device-bound keypair with safety number verification
+- **Persistent identity keys** — Ed25519 (with ECDSA P-256 browser fallback), device-bound keypair
+- **User verification** — Signal-style safety numbers and fingerprints; verified users show a badge
+- **Identity export/import** — Backup your identity as a passphrase-encrypted file (PBKDF2 + AES-256-GCM)
 - **ECDH P-256 key exchange** — Per-channel shared secrets derived via HKDF
+- **Built-in TLS** — Server always runs HTTPS/WSS; self-signed cert auto-generated, Let's Encrypt supported
 - **No telemetry** — Zero tracking, no analytics, no phone-home
 - **No accounts required** — Connect with just a nickname; identity stays on your device
 
 ### Server & Administration
 - **Self-hosting first** — Single binary, works fully offline / LAN, no cloud dependency
+- **TLS out of the box** — Self-signed (default), Let's Encrypt (automatic ACME), or custom certificates
 - **Optional server password** — Protect your server with `RADDIR_PASSWORD`; leave empty for open access
 - **Admin token authentication** — Set `RADDIR_ADMIN_TOKEN` and provide it on connect to get admin privileges
 - **Role-based permissions** — Admin, Member, Guest roles with granular permission control
@@ -36,12 +40,16 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Invite system** — Generate invite tokens via REST API
 
 ### Client
-- **Electron desktop app** — Native window with system theme support (dark/light/auto)
+- **Electron desktop app** — Native window, clean frameless UI
+- **Appearance settings** — Dark, light, or system theme (follows OS preference)
 - **Server browser** — Save multiple servers with name, address, password, and admin token
-- **Smart server URLs** — Type `localhost:4000` instead of `ws://localhost:4000/ws`
+- **Smart server URLs** — Type `your-server:4000` instead of `wss://your-server:4000/ws`
 - **Channel tree** — Hierarchical channels with inline user avatars and speaking rings
+- **User verification UI** — Click any user to verify via safety number; verified badge in channel tree and user list
+- **Your identity card** — Click yourself to see your fingerprint with a copy button
 - **E2EE text chat** — Per-channel encrypted chat with in-memory message history across channel switches
-- **Settings panel** — Audio, keybinds, and identity tabs; accessible before connecting
+- **Settings panel** — Audio, keybinds, appearance, and identity tabs
+- **Identity management** — View fingerprint, export/import encrypted identity backup, manage verified users
 - **Join/leave sounds** — Audio cues when users enter or leave channels
 - **Reconnect overlay** — Automatic reconnection handling with visual feedback
 - **Kick/ban notifications** — Toast notifications when kicked or banned
@@ -50,7 +58,8 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Channel tree model** — Persistent server → channel hierarchy, TeamSpeak-style
 - **SQLite database** — Zero-config persistence via better-sqlite3
 - **mediasoup SFU** — Scales to hundreds of users with configurable worker count
-- **Docker support** — `docker compose up -d` for production deployment
+- **Docker ready** — Multi-stage Dockerfile, Docker Hub image, Portainer-compatible
+- **Electron builds** — NSIS installer + portable exe (Windows), DMG (macOS), AppImage + deb (Linux)
 - **pnpm monorepo** — Shared types between server and client
 
 ## Quick Start
@@ -71,81 +80,150 @@ pnpm build:shared
 
 # Start the server (dev mode with hot reload)
 pnpm dev:server
+
+# Start the client (Electron + Vite + React)
+pnpm dev:client
 ```
 
-The server starts on `http://localhost:4000` with WebSocket signaling at `ws://localhost:4000/ws`.
+The server starts on `https://localhost:4000` with WebSocket signaling at `wss://localhost:4000/ws`. A self-signed TLS certificate is auto-generated on first start.
 
-### Client (Desktop App)
+### Browser-Only Client (no Electron)
 
 ```bash
-# Start the client dev server (Vite + React + Electron)
-pnpm --filter @raddir/client dev
+pnpm --filter @raddir/client dev:browser
 ```
 
-The client opens at `http://localhost:5173`. In Electron mode it launches a native window.
+Opens at `http://localhost:5173`.
 
-**Features:**
-- Connect to any Raddir server by URL
-- Channel tree with join/leave, user counts
-- Voice: mute, deafen, push-to-talk, voice activation detection
-- Per-user volume control (0–200%)
-- E2EE text chat with encryption indicators
-- Settings: audio devices, keybinds, identity management
-- Admin panel: channel CRUD, kick/ban, invite generation
-- Join/leave sounds, speaking indicators
-- Persistent Ed25519 identity with safety numbers
+## Deployment
 
-### Docker (recommended for production)
+### Docker (recommended)
+
+The server image is available on Docker Hub:
 
 ```bash
-docker compose up -d
+docker pull zahli/raddir-server:latest
 ```
 
-Or build and run manually:
+Or build locally:
 
 ```bash
-docker build -t raddir .
-docker run -d \
-  --name raddir \
-  --network host \
-  -v raddir-data:/data \
-  -e RADDIR_ANNOUNCED_IP=your.public.ip \
-  raddir
+docker build -f Dockerfile.server -t raddir-server .
 ```
+
+#### Docker Compose / Portainer Stack
+
+```yaml
+services:
+  raddir:
+    image: zahli/raddir-server:latest
+    container_name: raddir
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+      - "40000-40100:40000-40100/udp"
+    environment:
+      - RADDIR_HOST=0.0.0.0
+      - RADDIR_PORT=4000
+      - RADDIR_DB_PATH=/app/data/raddir.db
+      - RADDIR_RTC_MIN_PORT=40000
+      - RADDIR_RTC_MAX_PORT=40100
+      - RADDIR_ANNOUNCED_IP=       # Set to your server's public IP
+      - RADDIR_ADMIN_TOKEN=        # Optional
+      - RADDIR_PASSWORD=           # Optional
+      - RADDIR_TLS_MODE=selfsigned
+      - RADDIR_LOG_LEVEL=info
+    volumes:
+      - raddir-data:/app/data
+
+volumes:
+  raddir-data:
+    driver: local
+```
+
+For Let's Encrypt, set `RADDIR_TLS_MODE=letsencrypt`, `RADDIR_TLS_DOMAIN`, `RADDIR_TLS_EMAIL`, and expose port 80.
+
+### Electron Desktop Builds
+
+```bash
+# Windows (NSIS installer + portable exe)
+pnpm electron:build:win
+
+# macOS (DMG, x64 + arm64)
+pnpm electron:build:mac
+
+# Linux (AppImage + deb)
+pnpm electron:build:linux
+```
+
+Output goes to `packages/client/release/`.
+
+> **Note:** You can only build for your current OS natively. For cross-platform builds, use CI (e.g., GitHub Actions).
 
 ## Configuration
 
 Configuration is loaded in order: **environment variables** → **config file** → **defaults**.
 
+### Server
+
 | Variable | Default | Description |
 |---|---|---|
 | `RADDIR_HOST` | `0.0.0.0` | Listen address |
-| `RADDIR_PORT` | `4000` | HTTP/WebSocket port |
+| `RADDIR_PORT` | `4000` | HTTPS/WSS port |
 | `RADDIR_RTC_MIN_PORT` | `40000` | WebRTC UDP port range start |
 | `RADDIR_RTC_MAX_PORT` | `49999` | WebRTC UDP port range end |
 | `RADDIR_ANNOUNCED_IP` | *(empty)* | Public IP for WebRTC (required for remote access) |
 | `RADDIR_DB_PATH` | `./data/raddir.db` | SQLite database path |
-| `RADDIR_PASSWORD` | *(empty)* | Server password (leave empty for open access) |
-| `RADDIR_ADMIN_TOKEN` | *(empty)* | Admin authentication token |
-| `RADDIR_LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 | `RADDIR_MEDIA_WORKERS` | *(CPU count)* | Number of mediasoup workers |
 | `RADDIR_CONFIG_PATH` | `./raddir.config.json` | Path to optional JSON config file |
+
+### Security
+
+| Variable | Default | Description |
+|---|---|---|
+| `RADDIR_PASSWORD` | *(empty)* | Server password (leave empty for open access) |
+| `RADDIR_ADMIN_TOKEN` | *(empty)* | Admin authentication token |
+
+### TLS
+
+The server **always** runs HTTPS/WSS. Three modes are available:
+
+| Variable | Default | Description |
+|---|---|---|
+| `RADDIR_TLS_MODE` | `selfsigned` | TLS mode: `selfsigned`, `letsencrypt`, or `custom` |
+| `RADDIR_TLS_DOMAIN` | *(empty)* | Domain name (required for `letsencrypt`) |
+| `RADDIR_TLS_EMAIL` | *(empty)* | Contact email (required for `letsencrypt`) |
+| `RADDIR_TLS_CERT` | *(empty)* | Path to PEM cert file (required for `custom`) |
+| `RADDIR_TLS_KEY` | *(empty)* | Path to PEM key file (required for `custom`) |
+
+**Self-signed** (default): Auto-generates an RSA-2048 certificate on first start, valid 10 years, persisted in the data directory. The Electron client accepts self-signed certs automatically.
+
+**Let's Encrypt**: Obtains a free certificate via ACME HTTP-01 challenge. Requires a domain pointing to the server and port 80 open (temporarily, during cert issuance). Certificates auto-renew every 12 hours if expiring within 30 days — hot-swapped without restart.
+
+**Custom**: Bring your own PEM certificate and key files (e.g., from a reverse proxy or corporate CA).
+
+### Logging
+
+| Variable | Default | Description |
+|---|---|---|
+| `RADDIR_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ### Firewall / Port Forwarding
 
 | Port | Protocol | Purpose |
 |---|---|---|
-| `4000` | TCP | HTTP API + WebSocket signaling |
+| `4000` | TCP | HTTPS API + WSS signaling |
+| `80` | TCP | ACME challenge (Let's Encrypt only, temporary) |
 | `40000-49999` | UDP | WebRTC media (voice) |
 
-For Docker Compose, the default range is narrowed to `40000-40100` for practicality. Adjust `RADDIR_RTC_MIN_PORT` / `RADDIR_RTC_MAX_PORT` as needed.
+For Docker Compose, the default UDP range is narrowed to `40000-40100` for practicality. Adjust `RADDIR_RTC_MIN_PORT` / `RADDIR_RTC_MAX_PORT` as needed.
 
 ## Architecture
 
 ```
 packages/
 ├── shared/    # Protocol types, permission enums, crypto types
-├── server/    # Node.js backend: Fastify + mediasoup SFU + SQLite
+├── server/    # Node.js backend: Fastify (HTTPS) + mediasoup SFU + SQLite
 └── client/    # Electron + React + Vite desktop app
 ```
 
@@ -162,9 +240,18 @@ Mic → Opus encode → [E2EE: AES-256-GCM encrypt] → DTLS-SRTP → mediasoup 
 | Voice audio | ✅ DTLS-SRTP | ✅ AES-256-GCM | ❌ **No** |
 | Text chat | ✅ WSS (TLS) | ✅ AES-256-GCM | ❌ **No** |
 | Signaling / metadata | ✅ WSS (TLS) | — | ✅ Yes (routing) |
+| Identity keys | ✅ WSS (TLS) | — | ✅ Public keys only |
 | Telemetry | — | — | ❌ None sent |
 
 > The server sees *metadata* (who connects, when, to which channel). It **cannot** see or hear *content*. This is the same trust model as Signal.
+
+### User Verification
+
+Users can verify each other using **safety numbers** (12-digit numeric codes derived from SHA-256 of both public keys) and **fingerprints** (hex digest of a single public key). Verified users display a green shield badge in the channel tree and user list. Verification state is persisted locally.
+
+### Identity Backup
+
+Your cryptographic identity can be exported as a passphrase-encrypted JSON file (PBKDF2 key derivation + AES-256-GCM). This allows restoring your identity on a new device or after a reinstall. The salt and IV are stored in cleartext in the file — this is standard and safe, as they are not secrets; only the passphrase protects the key material.
 
 ## System Requirements
 

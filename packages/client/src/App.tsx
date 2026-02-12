@@ -10,7 +10,8 @@ import { loadSettings } from "./lib/settings-persistence";
 
 export function App() {
   const { connected, authenticated } = useServerStore();
-  const { theme, setResolvedTheme } = useSettingsStore();
+  const theme = useSettingsStore((s) => s.theme);
+  const setResolvedTheme = useSettingsStore((s) => s.setResolvedTheme);
   const { kickReason, banReason, setKickReason, setBanReason } = useConnection();
 
   // Load persisted settings on mount

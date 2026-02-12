@@ -1,0 +1,54 @@
+# ── Build stage ────────────────────────────────────────────────────────────────
+FROM node:20-bookworm AS build
+
+RUN corepack enable && corepack prepare pnpm@9 --activate
+
+WORKDIR /app
+
+# Copy workspace root files
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+
+# Copy shared and server packages
+COPY packages/shared/ packages/shared/
+COPY packages/server/ packages/server/
+
+# Install dependencies (including native addons: mediasoup, better-sqlite3, argon2)
+RUN pnpm install --frozen-lockfile
+
+# Build shared first, then server
+RUN pnpm --filter @raddir/shared build
+RUN pnpm --filter @raddir/server build
+
+# ── Production stage ──────────────────────────────────────────────────────────
+FROM node:20-bookworm-slim AS production
+
+RUN corepack enable && corepack prepare pnpm@9 --activate
+
+WORKDIR /app
+
+# Copy workspace root files
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy shared and server packages (source + built dist)
+COPY --from=build /app/packages/shared/ packages/shared/
+COPY --from=build /app/packages/server/ packages/server/
+
+# Install production dependencies only (native addons need rebuild on slim image)
+RUN pnpm install --frozen-lockfile --prod
+
+# Create data directory for SQLite
+RUN mkdir -p /app/data
+
+# Default environment
+ENV RADDIR_HOST=0.0.0.0
+ENV RADDIR_PORT=4000
+ENV RADDIR_DB_PATH=/app/data/raddir.db
+ENV RADDIR_RTC_MIN_PORT=40000
+ENV RADDIR_RTC_MAX_PORT=49999
+
+EXPOSE 4000
+EXPOSE 40000-49999/udp
+
+VOLUME ["/app/data"]
+
+CMD ["node", "packages/server/dist/index.js"]
