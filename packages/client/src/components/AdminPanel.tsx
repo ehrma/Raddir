@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useServerStore } from "../stores/serverStore";
-import { useSettingsStore } from "../stores/settingsStore";
 import { getSignalingClient } from "../hooks/useConnection";
 import { usePermissions } from "../hooks/usePermissions";
+import { getApiBase } from "../lib/api-base";
 import { cn } from "../lib/cn";
 import { Plus, Ban, Shield, X, Hash } from "lucide-react";
 import { RoleEditor } from "./Admin/RoleEditor";
@@ -54,19 +54,10 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function getApiBase(): string {
-  const wsUrl = useSettingsStore.getState().serverUrl;
-  return wsUrl.replace(/^ws/, "http").replace(/\/ws$/, "");
-}
-
 function ChannelAdmin() {
   const { channels, serverId } = useServerStore();
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [localChannels, setLocalChannels] = useState(channels);
-
-  // Sync with store
-  useState(() => { setLocalChannels(channels); });
 
   const handleCreate = async () => {
     if (!newName.trim() || !serverId) return;
@@ -79,7 +70,7 @@ function ChannelAdmin() {
       });
       if (res.ok) {
         const ch = await res.json();
-        setLocalChannels((prev) => [...prev, ch]);
+        useServerStore.setState((s) => ({ channels: [...s.channels, ch] }));
         setNewName("");
       }
     } catch (err) {
@@ -92,7 +83,7 @@ function ChannelAdmin() {
     try {
       const res = await fetch(`${getApiBase()}/api/channels/${channelId}`, { method: "DELETE" });
       if (res.ok) {
-        setLocalChannels((prev) => prev.filter((c) => c.id !== channelId));
+        useServerStore.setState((s) => ({ channels: s.channels.filter((c) => c.id !== channelId) }));
       }
     } catch (err) {
       console.error("[admin] Failed to delete channel:", err);
@@ -120,7 +111,7 @@ function ChannelAdmin() {
       </div>
 
       <div className="space-y-1">
-        {localChannels.map((ch) => (
+        {channels.map((ch) => (
           <div key={ch.id} className="flex items-center gap-2 px-3 py-2 bg-surface-800/50 rounded-lg group">
             <Hash className="w-3.5 h-3.5 text-surface-500" />
             <span className="text-sm text-surface-300 flex-1">{ch.name}</span>
@@ -250,7 +241,7 @@ function InviteAdmin() {
     if (!serverId || !userId) return;
     setCreating(true);
     try {
-      const res = await fetch(`http://localhost:4000/api/servers/${serverId}/invites`, {
+      const res = await fetch(`${getApiBase()}/api/servers/${serverId}/invites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ createdBy: userId, maxUses: 10, expiresInHours: 24 }),

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../../stores/serverStore";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { getApiBase } from "../../lib/api-base";
 import { cn } from "../../lib/cn";
 import { Plus, Trash2, Save, ChevronDown, ChevronRight } from "lucide-react";
 import type { PermissionSet, PermissionKey } from "@raddir/shared";
@@ -26,11 +26,6 @@ const PERMISSION_LABELS: Record<PermissionKey, string> = {
   managePermissions: "Manage Permissions",
   manageRoles: "Manage Roles",
 };
-
-function getApiBase(): string {
-  const wsUrl = useSettingsStore.getState().serverUrl;
-  return wsUrl.replace(/^ws/, "http").replace(/\/ws$/, "");
-}
 
 export function RoleEditor() {
   const { serverId, roles: storeRoles } = useServerStore();

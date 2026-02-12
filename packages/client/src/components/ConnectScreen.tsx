@@ -49,11 +49,11 @@ export function ConnectScreen() {
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {savedServers.map((server) => (
-            <button
+            <div
               key={server.id}
               onClick={() => setSelectedId(server.id)}
               className={cn(
-                "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors group",
+                "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors group cursor-pointer",
                 selectedId === server.id
                   ? "bg-accent/15 text-accent"
                   : "text-surface-300 hover:bg-surface-800 hover:text-surface-100"
@@ -97,7 +97,7 @@ export function ConnectScreen() {
                   </button>
                 )}
               </div>
-            </button>
+            </div>
           ))}
 
           {/* Add server */}

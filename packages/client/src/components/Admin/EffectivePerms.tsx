@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../../stores/serverStore";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { getApiBase } from "../../lib/api-base";
 import type { PermissionKey, PermissionSet } from "@raddir/shared";
 import { PERMISSION_KEYS } from "@raddir/shared";
 import { cn } from "../../lib/cn";
@@ -11,11 +11,6 @@ const PERMISSION_LABELS: Record<PermissionKey, string> = {
   admin: "Administrator", manageChannels: "Manage Channels",
   managePermissions: "Manage Permissions", manageRoles: "Manage Roles",
 };
-
-function getApiBase(): string {
-  const wsUrl = useSettingsStore.getState().serverUrl;
-  return wsUrl.replace(/^ws/, "http").replace(/\/ws$/, "");
-}
 
 export function EffectivePerms() {
   const { serverId, members, channels } = useServerStore();

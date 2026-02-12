@@ -13,6 +13,7 @@ import { channelRoutes } from "./api/routes/channels.js";
 import { inviteRoutes } from "./api/routes/invites.js";
 import { roleRoutes } from "./api/routes/roles.js";
 import { getTlsConfig, scheduleRenewal, type TlsMode, type TlsOptions } from "./tls.js";
+import cors from "@fastify/cors";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -60,6 +61,9 @@ async function main(): Promise<void> {
       key: tls.key,
     },
   });
+
+  // Enable CORS for API requests from the Electron/browser client
+  await fastify.register(cors, { origin: true });
 
   // Schedule automatic certificate renewal for Let's Encrypt
   scheduleRenewal(tlsOpts, (newTls) => {

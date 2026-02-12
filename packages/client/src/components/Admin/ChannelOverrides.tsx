@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../../stores/serverStore";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { getApiBase } from "../../lib/api-base";
 import { cn } from "../../lib/cn";
 import { Save, Hash } from "lucide-react";
 import type { PermissionSet, PermissionKey, ChannelPermissionOverride } from "@raddir/shared";
@@ -12,11 +12,6 @@ const PERMISSION_LABELS: Record<PermissionKey, string> = {
   admin: "Admin", manageChannels: "Manage Channels",
   managePermissions: "Manage Perms", manageRoles: "Manage Roles",
 };
-
-function getApiBase(): string {
-  const wsUrl = useSettingsStore.getState().serverUrl;
-  return wsUrl.replace(/^ws/, "http").replace(/\/ws$/, "");
-}
 
 export function ChannelOverrides() {
   const { channels, roles } = useServerStore();
