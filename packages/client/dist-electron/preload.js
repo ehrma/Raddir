@@ -1,15 +1,11 @@
-import { contextBridge, ipcRenderer } from "electron";
-contextBridge.exposeInMainWorld("raddir", {
-  registerPttKey: (key) => ipcRenderer.invoke("register-ptt-key", key),
-  unregisterPttKey: () => ipcRenderer.invoke("unregister-ptt-key"),
-  getTheme: () => ipcRenderer.invoke("get-theme"),
-  onPttPressed: (callback) => {
-    ipcRenderer.on("ptt-pressed", callback);
-    return () => ipcRenderer.removeListener("ptt-pressed", callback);
-  },
-  onThemeChanged: (callback) => {
-    const handler = (_event, theme) => callback(theme);
-    ipcRenderer.on("theme-changed", handler);
-    return () => ipcRenderer.removeListener("theme-changed", handler);
+import { contextBridge as o, ipcRenderer as e } from "electron";
+o.exposeInMainWorld("raddir", {
+  registerPttKey: (t) => e.invoke("register-ptt-key", t),
+  unregisterPttKey: () => e.invoke("unregister-ptt-key"),
+  getTheme: () => e.invoke("get-theme"),
+  onPttPressed: (t) => (e.on("ptt-pressed", t), () => e.removeListener("ptt-pressed", t)),
+  onThemeChanged: (t) => {
+    const r = (i, n) => t(n);
+    return e.on("theme-changed", r), () => e.removeListener("theme-changed", r);
   }
 });

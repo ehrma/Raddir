@@ -5,6 +5,7 @@ import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, LockOpen } from "lu
 import { cn } from "../lib/cn";
 import { useConnection } from "../hooks/useConnection";
 import { SettingsPanel } from "./Settings/SettingsPanel";
+import logoImg from "../assets/raddir-shield-logo.png";
 
 export function ConnectScreen() {
   const { nickname, savedServers, setServerUrl, setNickname, addServer, removeServer, updateServerPassword, updateServerAdminToken } = useSettingsStore();
@@ -165,7 +166,7 @@ export function ConnectScreen() {
         <div className="w-full max-w-sm px-8 space-y-6">
           <div className="text-center space-y-3">
             <img
-              src="/raddir-shield-logo.png"
+              src={logoImg}
               alt="Raddir"
               className="w-20 h-20 mx-auto dark:invert"
             />
