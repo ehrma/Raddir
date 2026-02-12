@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,14 +6,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+
+function getIconPath(): string {
+  // In dev, icon is in public/; in production, it's in dist/
+  if (process.env.VITE_DEV_SERVER_URL) {
+    return join(__dirname, "../public/icon.png");
+  }
+  return join(__dirname, "../dist/icon.png");
+}
 
 function createWindow(): void {
+  const iconPath = getIconPath();
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: "Raddir",
+    icon: iconPath,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
     autoHideMenuBar: true,
     webPreferences: {
@@ -44,6 +56,17 @@ app.commandLine.appendSwitch("ignore-certificate-errors");
 
 app.whenReady().then(() => {
   createWindow();
+
+  // System tray
+  const trayIcon = nativeImage.createFromPath(getIconPath()).resize({ width: 16, height: 16 });
+  tray = new Tray(trayIcon);
+  tray.setToolTip("Raddir");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Show Raddir", click: () => mainWindow?.show() },
+    { type: "separator" },
+    { label: "Quit", click: () => app.quit() },
+  ]));
+  tray.on("click", () => mainWindow?.show());
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

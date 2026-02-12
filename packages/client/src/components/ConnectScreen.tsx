@@ -163,8 +163,18 @@ export function ConnectScreen() {
       {/* Right panel — connect */}
       <div className="flex-1 flex items-center justify-center">
         <div className="w-full max-w-sm px-8 space-y-6">
-          <div className="text-center space-y-2">
-            <h1 className="text-3xl font-bold text-surface-50">Raddir</h1>
+          <div className="text-center space-y-3">
+            <img
+              src="/raddir-shield-logo.png"
+              alt="Raddir"
+              className="w-20 h-20 mx-auto dark:invert"
+            />
+            <h1
+              className="text-3xl text-surface-50"
+              style={{ fontFamily: '"Asimovian", sans-serif' }}
+            >
+              Raddir
+            </h1>
             <p className="text-sm text-surface-400 flex items-center justify-center gap-1.5">
               <Shield className="w-3.5 h-3.5" />
               End-to-end encrypted voice
