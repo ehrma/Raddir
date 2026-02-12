@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { nanoid } from "nanoid";
 import { getDb } from "../../db/database.js";
+import { requireAdmin } from "../auth.js";
 
 export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<{
@@ -8,6 +9,7 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
     Body: { maxUses?: number; expiresInHours?: number; createdBy: string };
   }>(
     "/api/servers/:serverId/invites",
+    { preHandler: requireAdmin },
     async (request, reply) => {
       const { serverId } = request.params;
       const { maxUses, expiresInHours, createdBy } = request.body;

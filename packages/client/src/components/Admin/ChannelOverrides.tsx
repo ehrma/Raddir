@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../../stores/serverStore";
-import { getApiBase } from "../../lib/api-base";
+import { getApiBase, getAuthHeaders } from "../../lib/api-base";
 import { cn } from "../../lib/cn";
 import { Save, Hash } from "lucide-react";
 import type { PermissionSet, PermissionKey, ChannelPermissionOverride } from "@raddir/shared";
@@ -76,7 +76,7 @@ export function ChannelOverrides() {
         `${getApiBase()}/api/channels/${selectedChannelId}/overrides/${selectedRoleId}`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ permissions: localPerms }),
         }
       );

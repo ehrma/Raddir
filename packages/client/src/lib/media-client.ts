@@ -18,6 +18,8 @@ export class MediaClient {
   private gainNodes = new Map<string, GainNode>();
   private audioElements = new Map<string, HTMLAudioElement>();
   private masterVolume = 1.0;
+  private userVolumes = new Map<string, number>();
+  private outputDeviceId = "default";
   private onConsumerCreated?: (userId: string, consumer: Consumer, stream: MediaStream) => void;
 
   constructor(signaling: SignalingClient) {
@@ -145,12 +147,24 @@ export class MediaClient {
             this.consumers.set(consumer.id, consumer);
             console.log("[media] Consumer created, track:", consumer.track.kind, "readyState:", consumer.track.readyState, "paused:", consumer.paused);
 
-            // Play via <audio> element — the only reliable path for WebRTC audio in Chrome
+            // Route through Web Audio GainNode for volume boost beyond 100%
             const stream = new MediaStream([consumer.track]);
+            const source = this.audioContext.createMediaStreamSource(stream);
+            const gain = this.audioContext.createGain();
+            const userVol = this.userVolumes.get(userId) ?? 1.0;
+            gain.gain.value = this.masterVolume * userVol;
+            source.connect(gain);
+            gain.connect(this.audioContext.destination);
+            this.gainNodes.set(userId, gain);
+
+            // Hidden audio element to keep the WebRTC track alive
             const audio = document.createElement("audio");
             audio.srcObject = stream;
             audio.autoplay = true;
-            audio.volume = this.masterVolume;
+            audio.volume = 0; // muted — playback is via GainNode
+            if (this.outputDeviceId !== "default" && typeof (audio as any).setSinkId === "function") {
+              (audio as any).setSinkId(this.outputDeviceId).catch(() => {});
+            }
             document.body.appendChild(audio);
             audio.play().catch(() => {});
             this.audioElements.set(userId, audio);
@@ -179,16 +193,32 @@ export class MediaClient {
   }
 
   setUserVolume(userId: string, volume: number): void {
-    const audio = this.audioElements.get(userId);
-    if (audio) {
-      audio.volume = Math.max(0, Math.min(1, volume));
+    this.userVolumes.set(userId, Math.max(0, volume));
+    const gain = this.gainNodes.get(userId);
+    if (gain) {
+      gain.gain.value = this.masterVolume * Math.max(0, volume);
+    }
+  }
+
+  async setOutputDevice(deviceId: string): Promise<void> {
+    this.outputDeviceId = deviceId;
+    // Route AudioContext to the selected device (Chromium 110+)
+    if (typeof (this.audioContext as any).setSinkId === "function") {
+      await (this.audioContext as any).setSinkId(deviceId).catch(() => {});
+    }
+    // Route all existing audio elements
+    for (const audio of this.audioElements.values()) {
+      if (typeof (audio as any).setSinkId === "function") {
+        (audio as any).setSinkId(deviceId).catch(() => {});
+      }
     }
   }
 
   setMasterVolume(volume: number): void {
-    this.masterVolume = Math.max(0, Math.min(1, volume));
-    for (const audio of this.audioElements.values()) {
-      audio.volume = this.masterVolume;
+    this.masterVolume = Math.max(0, volume);
+    for (const [userId, gain] of this.gainNodes.entries()) {
+      const userVol = this.userVolumes.get(userId) ?? 1.0;
+      gain.gain.value = this.masterVolume * userVol;
     }
   }
 

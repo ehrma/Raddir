@@ -54,6 +54,13 @@ export function useConnection() {
     }
 
     const wsUrl = normalizeServerUrl(serverUrl);
+
+    // Register the server host as trusted for self-signed TLS certificates
+    try {
+      const serverHost = new URL(wsUrl.replace(/^ws/, "http")).host;
+      (window as any).raddir?.trustServerHost(serverHost);
+    } catch {}
+
     signalingClient = new SignalingClient(wsUrl);
     keyManager = new KeyManager(signalingClient);
     await keyManager.initialize();

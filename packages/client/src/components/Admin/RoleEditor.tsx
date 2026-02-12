@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../../stores/serverStore";
-import { getApiBase } from "../../lib/api-base";
+import { getApiBase, getAuthHeaders } from "../../lib/api-base";
 import { cn } from "../../lib/cn";
 import { Plus, Trash2, Save, ChevronDown, ChevronRight } from "lucide-react";
 import type { PermissionSet, PermissionKey } from "@raddir/shared";
@@ -77,7 +77,7 @@ export function RoleEditor() {
     try {
       await fetch(`${getApiBase()}/api/roles/${selectedRole.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           name: selectedRole.name,
           permissions: selectedRole.permissions,
@@ -101,7 +101,7 @@ export function RoleEditor() {
       };
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}/roles`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ name: newRoleName.trim(), permissions: defaultPerms, priority: 5 }),
       });
       const role = await res.json();
@@ -116,7 +116,7 @@ export function RoleEditor() {
   const handleDelete = async () => {
     if (!selectedRole || selectedRole.isDefault) return;
     try {
-      await fetch(`${getApiBase()}/api/roles/${selectedRole.id}`, { method: "DELETE" });
+      await fetch(`${getApiBase()}/api/roles/${selectedRole.id}`, { method: "DELETE", headers: getAuthHeaders() });
       setRoles((prev) => prev.filter((r) => r.id !== selectedRole.id));
       setSelectedRoleId(roles[0]?.id ?? null);
     } catch (err) {

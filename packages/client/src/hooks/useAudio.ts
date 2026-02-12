@@ -183,8 +183,13 @@ export function useAudio() {
       const signaling = getSignalingClient();
       signaling?.send({ type: "deafen", deafened: isDeafened });
 
-      // When deafened, mute all consumers by setting volume to 0
-      // (actual consumer pause would require iterating all consumers)
+      // Mute/unmute all incoming audio via master volume
+      if (isDeafened) {
+        mediaClient?.setMasterVolume(0);
+      } else {
+        const vol = useSettingsStore.getState().outputVolume;
+        mediaClient?.setMasterVolume(vol);
+      }
     }
   }, [isDeafened]);
 
@@ -286,6 +291,11 @@ export function useAudio() {
       switchInputDevice(inputDeviceId);
     }
   }, [inputDeviceId, switchInputDevice]);
+
+  // Output device routing
+  useEffect(() => {
+    mediaClient?.setOutputDevice(outputDeviceId);
+  }, [outputDeviceId]);
 
   // Master output volume
   const outputVolume = useSettingsStore((s) => s.outputVolume);

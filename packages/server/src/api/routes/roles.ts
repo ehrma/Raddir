@@ -11,6 +11,7 @@ import {
 } from "../../models/permission.js";
 import { computeEffectivePermissions } from "../../permissions/engine.js";
 import type { PermissionSet } from "@raddir/shared";
+import { requireAdmin } from "../auth.js";
 
 export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   // List roles for a server
@@ -22,7 +23,7 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<{
     Params: { serverId: string };
     Body: { name: string; permissions: PermissionSet; priority?: number };
-  }>("/api/servers/:serverId/roles", async (req) => {
+  }>("/api/servers/:serverId/roles", { preHandler: requireAdmin }, async (req) => {
     const { name, permissions, priority } = req.body;
     return createRole(req.params.serverId, name, permissions, { priority });
   });
@@ -31,7 +32,7 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.patch<{
     Params: { roleId: string };
     Body: { name?: string; permissions?: PermissionSet; priority?: number };
-  }>("/api/roles/:roleId", async (req, reply) => {
+  }>("/api/roles/:roleId", { preHandler: requireAdmin }, async (req, reply) => {
     const role = getRole(req.params.roleId);
     if (!role) return reply.code(404).send({ error: "Role not found" });
 
@@ -40,7 +41,7 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // Delete a role
-  fastify.delete<{ Params: { roleId: string } }>("/api/roles/:roleId", async (req, reply) => {
+  fastify.delete<{ Params: { roleId: string } }>("/api/roles/:roleId", { preHandler: requireAdmin }, async (req, reply) => {
     const role = getRole(req.params.roleId);
     if (!role) return reply.code(404).send({ error: "Role not found" });
     if (role.isDefault) return reply.code(400).send({ error: "Cannot delete default role" });
@@ -58,7 +59,7 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.put<{
     Params: { channelId: string; roleId: string };
     Body: { permissions: Partial<PermissionSet> };
-  }>("/api/channels/:channelId/overrides/:roleId", async (req) => {
+  }>("/api/channels/:channelId/overrides/:roleId", { preHandler: requireAdmin }, async (req) => {
     setChannelOverride(req.params.channelId, req.params.roleId, req.body.permissions);
     return { success: true };
   });
@@ -66,7 +67,7 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete channel permission override
   fastify.delete<{
     Params: { channelId: string; roleId: string };
-  }>("/api/channels/:channelId/overrides/:roleId", async (req) => {
+  }>("/api/channels/:channelId/overrides/:roleId", { preHandler: requireAdmin }, async (req) => {
     deleteChannelOverride(req.params.channelId, req.params.roleId);
     return { success: true };
   });

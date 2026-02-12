@@ -1,31 +1,30 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeFileSync } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let trustedServerHost: string | null = null;
 
-function getIconPath(): string {
-  // In dev, icon is in public/; in production, it's in dist/
+function getTrayIconPath(): string {
   if (process.env.VITE_DEV_SERVER_URL) {
-    return join(__dirname, "../public/icon.png");
+    return join(__dirname, "../public/raddir-tray-icon.png");
   }
-  return join(__dirname, "../dist/icon.png");
+  return join(__dirname, "../dist/raddir-tray-icon.png");
 }
 
 function createWindow(): void {
-  const iconPath = getIconPath();
-
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: "Raddir",
-    icon: iconPath,
+    icon: getTrayIconPath(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
     autoHideMenuBar: true,
     webPreferences: {
@@ -51,15 +50,27 @@ function createWindow(): void {
   });
 }
 
-// Accept self-signed TLS certificates (Raddir server generates one automatically)
-app.commandLine.appendSwitch("ignore-certificate-errors");
+// Accept self-signed TLS certificates only for the configured Raddir server
+app.on("certificate-error", (event, _webContents, url, _error, _certificate, callback) => {
+  try {
+    const parsed = new URL(url);
+    if (trustedServerHost && parsed.host === trustedServerHost) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+  } catch {}
+  callback(false);
+});
 
 app.whenReady().then(() => {
   createWindow();
 
-  // System tray
-  const trayIcon = nativeImage.createFromPath(getIconPath()).resize({ width: 16, height: 16 });
-  tray = new Tray(trayIcon);
+  // System tray — write to temp file to avoid Windows icon cache issues
+  const trayImage = nativeImage.createFromPath(getTrayIconPath());
+  const tempTrayPath = join(app.getPath("temp"), `raddir-tray-${Date.now()}.png`);
+  writeFileSync(tempTrayPath, trayImage.toPNG());
+  tray = new Tray(tempTrayPath);
   tray.setToolTip("Raddir");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Show Raddir", click: () => mainWindow?.show() },
@@ -102,6 +113,11 @@ ipcMain.handle("register-ptt-key", (_event, key: string) => {
 
 ipcMain.handle("unregister-ptt-key", () => {
   globalShortcut.unregisterAll();
+});
+
+// IPC: Register the Raddir server host to trust its self-signed certificate
+ipcMain.handle("trust-server-host", (_event, host: string) => {
+  trustedServerHost = host || null;
 });
 
 // IPC: Get system theme

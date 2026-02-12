@@ -18,3 +18,14 @@ export function getApiBase(): string {
   // Server always uses TLS
   return "https://" + url;
 }
+
+/** Get Authorization headers for admin API requests. */
+export function getAuthHeaders(): Record<string, string> {
+  const { savedServers, serverUrl } = useSettingsStore.getState();
+  const server = savedServers.find((s) => s.address === serverUrl);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (server?.adminToken) {
+    headers["Authorization"] = `Bearer ${server.adminToken}`;
+  }
+  return headers;
+}

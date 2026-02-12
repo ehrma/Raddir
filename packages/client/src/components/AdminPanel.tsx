@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useServerStore } from "../stores/serverStore";
 import { getSignalingClient } from "../hooks/useConnection";
 import { usePermissions } from "../hooks/usePermissions";
-import { getApiBase } from "../lib/api-base";
+import { getApiBase, getAuthHeaders } from "../lib/api-base";
 import { cn } from "../lib/cn";
 import { Plus, Ban, Shield, X, Hash } from "lucide-react";
 import { RoleEditor } from "./Admin/RoleEditor";
@@ -65,7 +65,7 @@ function ChannelAdmin() {
     try {
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}/channels`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ name: newName.trim() }),
       });
       if (res.ok) {
@@ -81,7 +81,7 @@ function ChannelAdmin() {
 
   const handleDelete = async (channelId: string) => {
     try {
-      const res = await fetch(`${getApiBase()}/api/channels/${channelId}`, { method: "DELETE" });
+      const res = await fetch(`${getApiBase()}/api/channels/${channelId}`, { method: "DELETE", headers: getAuthHeaders() });
       if (res.ok) {
         useServerStore.setState((s) => ({ channels: s.channels.filter((c) => c.id !== channelId) }));
       }
@@ -243,7 +243,7 @@ function InviteAdmin() {
     try {
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}/invites`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ createdBy: userId, maxUses: 10, expiresInHours: 24 }),
       });
       if (res.ok) {

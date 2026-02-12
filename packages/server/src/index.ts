@@ -14,6 +14,7 @@ import { inviteRoutes } from "./api/routes/invites.js";
 import { roleRoutes } from "./api/routes/roles.js";
 import { getTlsConfig, scheduleRenewal, type TlsMode, type TlsOptions } from "./tls.js";
 import cors from "@fastify/cors";
+import { setAdminToken } from "./api/auth.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -22,6 +23,9 @@ async function main(): Promise<void> {
   console.log(`[raddir] RTC ports: ${config.rtcMinPort}-${config.rtcMaxPort}`);
   console.log(`[raddir] DB: ${config.dbPath}`);
   console.log(`[raddir] Media workers: ${config.mediaWorkers}`);
+
+  // Set admin token for REST API authentication
+  setAdminToken(config.adminToken);
 
   // Initialize database
   initDb(config.dbPath);

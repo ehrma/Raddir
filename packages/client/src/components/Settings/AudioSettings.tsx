@@ -79,7 +79,7 @@ export function AudioSettings() {
         <input
           type="range"
           min="0"
-          max="100"
+          max="200"
           value={Math.round(outputVolume * 100)}
           onChange={(e) => setOutputVolume(parseInt(e.target.value) / 100)}
           className="w-full accent-accent"

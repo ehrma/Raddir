@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getChannelsByServer, getChannel, createChannel, deleteChannel } from "../../models/channel.js";
 import type { Channel } from "@raddir/shared";
+import { requireAdmin } from "../auth.js";
 
 export async function channelRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Params: { serverId: string } }>(
@@ -28,6 +29,7 @@ export async function channelRoutes(fastify: FastifyInstance): Promise<void> {
     Body: { name: string; parentId?: string; description?: string; position?: number; maxUsers?: number; joinPower?: number; talkPower?: number };
   }>(
     "/api/servers/:serverId/channels",
+    { preHandler: requireAdmin },
     async (request, reply) => {
       const { serverId } = request.params;
       const { name, ...opts } = request.body;
@@ -45,6 +47,7 @@ export async function channelRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.delete<{ Params: { channelId: string } }>(
     "/api/channels/:channelId",
+    { preHandler: requireAdmin },
     async (request, reply) => {
       const channel = getChannel(request.params.channelId);
       if (!channel) return reply.code(404).send({ error: "Channel not found" });
