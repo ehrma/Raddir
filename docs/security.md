@@ -112,8 +112,10 @@ Admin token grants **ephemeral** privileges for the WebSocket session only — n
 
 ### Invite System Hardening
 
-- Invite blobs contain the server address as a **routing hint** only — the server returns its canonical address from the database, never trusting the blob
-- Each redeem **revokes** previous credentials for the same public key on that server and mints a fresh one
+- **Invite blob v2** contains the server address as a **routing hint** only — the server returns its canonical address from the database, never trusting the blob
+- **No publicKey at redeem time** — the `/api/invites/redeem` endpoint creates an **unbound** credential (no identity attached). This means invites work for users who don't yet have a keypair
+- **Identity binding on first WS auth** — when the client connects via WebSocket with a credential and publicKey, the server binds the credential to that publicKey. Subsequent connections must present the same publicKey, preventing credential theft
+- **Stolen public keys are harmless** — without the credential secret, knowing someone's public key cannot be used to impersonate them
 - Invite use counts are enforced with an **atomic** SQL UPDATE to prevent race conditions exceeding `maxUses`
 - `createdBy` metadata is set server-side, not accepted from the request body
 

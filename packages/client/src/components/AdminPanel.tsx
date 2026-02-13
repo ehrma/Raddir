@@ -251,7 +251,7 @@ function InviteAdmin() {
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}/invites`, {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ createdBy: userId, maxUses: 10, expiresInHours: 24, serverAddress }),
+        body: JSON.stringify({ maxUses: 10, expiresInHours: 24, serverAddress }),
       });
       if (res.ok) {
         const data = await res.json();

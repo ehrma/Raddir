@@ -4,7 +4,6 @@ import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, Ticket, Pencil } fr
 import { cn } from "../lib/cn";
 import { useConnection } from "../hooks/useConnection";
 import { SettingsPanel } from "./Settings/SettingsPanel";
-import { getOrCreateIdentity } from "../lib/e2ee/identity";
 import { normalizeServerUrl } from "../lib/normalize-url";
 import logoImg from "../assets/raddir-shield-logo.png";
 
@@ -61,7 +60,7 @@ export function ConnectScreen() {
         while (b64.length % 4 !== 0) b64 += "=";
         const json = atob(b64);
         decoded = JSON.parse(json);
-        if (decoded.v !== 1 || !decoded.a || !decoded.t) throw new Error();
+        if ((decoded.v !== 1 && decoded.v !== 2) || !decoded.a || !decoded.t) throw new Error();
       } catch {
         setInviteError("Invalid invite code");
         setRedeeming(false);
@@ -82,21 +81,11 @@ export function ConnectScreen() {
       if (!apiHost.includes(":")) apiHost += ":4000";
       const apiBase = "https://" + apiHost;
 
-      // Get or create identity for the public key
-      let publicKey: string;
-      try {
-        const identity = await getOrCreateIdentity();
-        publicKey = identity.publicKeyHex;
-      } catch {
-        setInviteError("Failed to generate identity key");
-        setRedeeming(false);
-        return;
-      }
-
+      // Redeem without publicKey — credential is unbound until first WS auth
       const res = await fetch(`${apiBase}/api/invites/redeem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inviteBlob: code, publicKey }),
+        body: JSON.stringify({ inviteBlob: code }),
       });
 
       const data = await res.json();

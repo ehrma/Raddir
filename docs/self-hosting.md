@@ -157,9 +157,10 @@ The `RADDIR_ADMIN_TOKEN` grants **ephemeral** admin privileges for the duration 
 
 ### Invite System
 
-- Invite blobs contain the server address (routing hint) and a random token
+- **Invite blob v2** contains the server address (routing hint) and a random token
 - The server stores the canonical address in its database — the blob address is **not trusted** for authorization
-- Each redeem mints a fresh session credential and **revokes** any previous credential for that public key on that server
+- Redeem creates an **unbound** credential (no public key attached). The credential is bound to the user's identity on first WebSocket auth
+- Once bound, the credential only works with the matching public key — stolen public keys alone are useless
 - Invite uses are enforced atomically to prevent race conditions exceeding `maxUses`
 
 ### Proxy Trust (`RADDIR_TRUST_PROXY`)

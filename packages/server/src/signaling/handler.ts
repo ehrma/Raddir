@@ -153,21 +153,35 @@ async function handleAuth(
       authenticated = true;
     }
 
-    // Option 2: Session credential (from invite redemption) — scoped to this server
-    if (!authenticated && msg.credential && msg.publicKey) {
+    // Option 2: Session credential (from invite redemption)
+    if (!authenticated && msg.credential) {
       const db = getDb();
       const cred = db.prepare(
-        "SELECT id FROM session_credentials WHERE credential = ? AND user_public_key = ? AND server_id = ? AND revoked_at IS NULL"
-      ).get(msg.credential, msg.publicKey, server.id) as any;
+        "SELECT id, user_public_key, bound_at FROM session_credentials WHERE credential = ? AND server_id = ? AND revoked_at IS NULL"
+      ).get(msg.credential, server.id) as any;
+
       if (cred) {
-        authenticated = true;
+        if (!cred.user_public_key) {
+          // Unbound credential — bind it to this publicKey now (bootstrap identity)
+          if (msg.publicKey) {
+            const now = Math.floor(Date.now() / 1000);
+            db.prepare(
+              "UPDATE session_credentials SET user_public_key = ?, bound_at = ? WHERE id = ?"
+            ).run(msg.publicKey, now, cred.id);
+          }
+          authenticated = true;
+        } else if (cred.user_public_key === msg.publicKey) {
+          // Already bound — publicKey matches
+          authenticated = true;
+        }
+        // If bound to a different publicKey, authentication fails (credential stolen)
       }
     }
 
     if (!authenticated) {
       send(ws, { type: "auth-result", success: false, error: "Invalid server password or credential" });
       ws.close();
-      return { ws, userId: "", nickname: "", serverId: null, channelId: null, isMuted: false, isDeafened: false } as ConnectedClient;
+      return { ws, userId: "", nickname: "", serverId: null, channelId: null, isMuted: false, isDeafened: false, isAdmin: false } as ConnectedClient;
     }
   }
 

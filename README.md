@@ -33,8 +33,8 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **TLS out of the box** — Self-signed (default), Let's Encrypt (automatic ACME), or custom certificates
 - **Optional server password** — Protect your server with `RADDIR_PASSWORD`; leave empty for open access
 - **Admin token authentication** — Set `RADDIR_ADMIN_TOKEN` and provide it on connect to get ephemeral admin privileges for that session (not persisted to DB); all mutating REST API routes require it
-- **Invite system** — Admins generate invite codes that encode the server address into a shareable blob. Recipients paste the code on the connect screen to auto-add the server. The server password is **never** included — instead, a per-user session credential is issued on redemption (old credentials are revoked)
-- **Session credentials** — Invited users authenticate with a personal credential tied to their public key, not the server password. Credentials can be revoked server-side
+- **Invite system** — Admins generate invite codes that encode the server address (routing hint) and a token into a shareable blob. Recipients paste the code on the connect screen to redeem an **unbound** session credential — no identity key is needed at this stage. The server password is **never** included
+- **Session credentials** — On first WebSocket connect, the credential is **bound** to the user's public key. Subsequent connections must present the same key. Credentials can be revoked server-side
 - **Encrypted credential storage** — Passwords, admin tokens, and session credentials are encrypted at rest using Electron's OS-level `safeStorage` API (DPAPI on Windows, Keychain on macOS, libsecret on Linux). Falls back to plaintext in browser mode
 - **Rate limiting** — IP-based sliding-window rate limiting on WebSocket auth and public invite endpoints
 - **CORS policy** — Restricted to Electron (`file://`, `app://`) and localhost dev origins

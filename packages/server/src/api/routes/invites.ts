@@ -15,7 +15,7 @@ inviteLimiter.startCleanup();
  * the token against its own DB and returns the canonical address from there.
  */
 function encodeInviteBlob(serverAddress: string, token: string): string {
-  const blob = JSON.stringify({ v: 1, a: serverAddress, t: token });
+  const blob = JSON.stringify({ v: 2, a: serverAddress, t: token });
   return Buffer.from(blob, "utf-8").toString("base64url");
 }
 
@@ -27,7 +27,8 @@ function decodeInviteBlob(encoded: string): { address: string; token: string } |
   try {
     const json = Buffer.from(encoded, "base64url").toString("utf-8");
     const parsed = JSON.parse(json);
-    if (!parsed.a || !parsed.t) return null;
+    // Accept v1 and v2 blobs (same shape, just version bump)
+    if ((parsed.v !== 1 && parsed.v !== 2) || !parsed.a || !parsed.t) return null;
     return { address: parsed.a, token: parsed.t };
   } catch {
     return null;
@@ -51,8 +52,8 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "serverAddress is required" };
       }
 
-      // createdBy is set server-side — never trust the client for audit metadata
-      const createdBy = "admin";
+      // createdBy is set server-side — no user identity available at REST API level
+      const createdBy = null;
 
       const id = nanoid();
       const token = nanoid(12);
@@ -114,9 +115,9 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Redeem an invite token — creates a permanent session credential
+  // Redeem an invite token — creates an unbound session credential (no publicKey yet)
   fastify.post<{
-    Body: { inviteBlob: string; publicKey: string };
+    Body: { inviteBlob: string };
   }>(
     "/api/invites/redeem",
     async (request, reply) => {
@@ -125,11 +126,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         reply.status(429);
         return { error: "Too many requests. Try again later." };
       }
-      const { inviteBlob, publicKey } = request.body;
+      const { inviteBlob } = request.body;
 
-      if (!inviteBlob || !publicKey) {
+      if (!inviteBlob) {
         reply.status(400);
-        return { error: "inviteBlob and publicKey are required" };
+        return { error: "inviteBlob is required" };
       }
 
       const decoded = decodeInviteBlob(inviteBlob);
@@ -165,19 +166,14 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "Invite has reached max uses or expired" };
       }
 
-      // Revoke any existing credentials for this pubkey on this server
-      db.prepare(
-        "UPDATE session_credentials SET revoked_at = ? WHERE user_public_key = ? AND server_id = ? AND revoked_at IS NULL"
-      ).run(now, publicKey, row.server_id);
-
-      // Create a fresh session credential
+      // Create an unbound credential — publicKey will be bound on first WS auth
       const credentialId = nanoid();
       const credential = nanoid(32);
 
       db.prepare(`
-        INSERT INTO session_credentials (id, server_id, user_public_key, credential, invite_token_id)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(credentialId, row.server_id, publicKey, credential, row.id);
+        INSERT INTO session_credentials (id, server_id, credential, invite_token_id)
+        VALUES (?, ?, ?, ?)
+      `).run(credentialId, row.server_id, credential, row.id);
 
       return {
         credential,

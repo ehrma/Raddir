@@ -191,6 +191,54 @@ const MIGRATIONS: Migration[] = [
       CREATE UNIQUE INDEX idx_users_public_key ON users(public_key) WHERE public_key IS NOT NULL;
     `,
   },
+  {
+    name: "005_unbound_credentials",
+    sql: `
+      -- Recreate session_credentials with nullable user_public_key and bound_at column.
+      -- SQLite doesn't support ALTER COLUMN, so we recreate the table.
+      CREATE TABLE session_credentials_new (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        user_public_key TEXT,
+        credential TEXT NOT NULL UNIQUE,
+        invite_token_id TEXT REFERENCES invite_tokens(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        revoked_at INTEGER,
+        bound_at INTEGER
+      );
+      INSERT INTO session_credentials_new (id, server_id, user_public_key, credential, invite_token_id, created_at, revoked_at, bound_at)
+        SELECT id, server_id, user_public_key, credential, invite_token_id, created_at, revoked_at, created_at
+        FROM session_credentials;
+      DROP TABLE session_credentials;
+      ALTER TABLE session_credentials_new RENAME TO session_credentials;
+      CREATE INDEX idx_session_creds_credential ON session_credentials(credential);
+      CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
+    `,
+  },
+  {
+    name: "006_nullable_created_by",
+    sql: `
+      -- Drop FK constraint on created_by (admin API has no user identity to reference).
+      CREATE TABLE invite_tokens_new (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        created_by TEXT,
+        max_uses INTEGER,
+        uses INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        server_address TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO invite_tokens_new (id, server_id, token, created_by, max_uses, uses, expires_at, created_at, server_address)
+        SELECT id, server_id, token, created_by, max_uses, uses, expires_at, created_at, server_address
+        FROM invite_tokens;
+      DROP TABLE invite_tokens;
+      ALTER TABLE invite_tokens_new RENAME TO invite_tokens;
+      CREATE INDEX idx_invite_tokens_server ON invite_tokens(server_id);
+      CREATE INDEX idx_invite_tokens_token ON invite_tokens(token);
+    `,
+  },
 ];
 
 export function closeDb(): void {
