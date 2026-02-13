@@ -14,8 +14,7 @@ export function IdentitySettings() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const key = getStoredIdentityPublicKey();
-    setPublicKey(key);
+    getStoredIdentityPublicKey().then(setPublicKey);
   }, []);
 
   const handleRegenerate = async () => {
@@ -61,7 +60,7 @@ export function IdentitySettings() {
     try {
       const contents = await file.text();
       await importIdentity(contents, passphrase);
-      const key = getStoredIdentityPublicKey();
+      const key = await getStoredIdentityPublicKey();
       setPublicKey(key);
       setShowImport(false);
       setPassphrase("");

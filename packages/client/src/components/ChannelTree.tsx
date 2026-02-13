@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerStore } from "../stores/serverStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useVerificationStore } from "../stores/verificationStore";
@@ -183,8 +183,12 @@ function ChannelUserEntry({ user }: { user: SessionInfo }) {
 
 function MyIdentityDialog({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const publicKey = getStoredIdentityPublicKey();
+  const [publicKey, setPublicKey] = useState<string | null>(null);
   const fingerprint = publicKey ? computeFingerprint(publicKey) : "";
+
+  useEffect(() => {
+    getStoredIdentityPublicKey().then(setPublicKey);
+  }, []);
 
   const handleCopy = () => {
     if (fingerprint) {

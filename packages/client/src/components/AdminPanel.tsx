@@ -240,13 +240,8 @@ function InviteAdmin() {
   const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
-    const { savedServers, serverUrl: currentUrl } = useSettingsStore.getState();
-    const matchedServer = savedServers.find((s) => s.address === currentUrl);
-    console.log("[admin] handleCreate called, serverId:", serverId, "userId:", userId,
-      "serverUrl:", currentUrl, "matchedServer:", matchedServer?.name,
-      "hasAdminToken:", !!matchedServer?.adminToken, "headers:", getAuthHeaders());
     if (!serverId || !userId) {
-      setError("Not connected (serverId=" + serverId + ", userId=" + userId + ")");
+      setError("Not connected");
       return;
     }
     setCreating(true);

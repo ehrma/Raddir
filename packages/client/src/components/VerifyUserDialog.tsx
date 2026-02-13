@@ -11,11 +11,15 @@ interface Props {
 }
 
 export function VerifyUserDialog({ user, onClose }: Props) {
-  const myPublicKey = getStoredIdentityPublicKey();
+  const [myPublicKey, setMyPublicKey] = useState<string | null>(null);
   const { isVerified, verifyUser, unverifyUser } = useVerificationStore();
   const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const verified = user.publicKey ? isVerified(user.publicKey) : false;
+
+  useEffect(() => {
+    getStoredIdentityPublicKey().then(setMyPublicKey);
+  }, []);
 
   useEffect(() => {
     if (myPublicKey && user.publicKey) {

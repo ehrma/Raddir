@@ -7,7 +7,46 @@ export interface LocalIdentity {
   createdAt: number;
 }
 
-// Try Ed25519 first, fall back to ECDSA P-256 (universally supported)
+// ─── Electron IPC bridge detection ───────────────────────────────────────────
+
+const raddir = (window as any).raddir as {
+  identityGetPublicKey?: () => Promise<string>;
+  identitySign?: (data: string) => Promise<string>;
+  identityGetAlgorithm?: () => Promise<string>;
+  identityImportLegacy?: (pub: string, priv: string, algo: string) => Promise<boolean>;
+  identityExport?: (passphrase: string) => Promise<string | null>;
+  identityImportEncrypted?: (file: string, passphrase: string) => Promise<{ success: boolean; error?: string }>;
+} | undefined;
+
+const hasSecureIdentity = !!(raddir?.identityGetPublicKey && raddir?.identitySign);
+
+// ─── Legacy migration (one-time: localStorage → main process) ────────────────
+
+let migrationDone = false;
+
+async function migrateLegacyIdentity(): Promise<void> {
+  if (migrationDone || !hasSecureIdentity) return;
+  migrationDone = true;
+
+  const raw = localStorage.getItem(IDENTITY_STORAGE_KEY);
+  if (!raw) return;
+
+  try {
+    const legacy = JSON.parse(raw) as LocalIdentity;
+    if (legacy.publicKey && legacy.privateKey) {
+      const imported = await raddir!.identityImportLegacy!(legacy.publicKey, legacy.privateKey, legacy.algorithm ?? "Ed25519");
+      if (imported) {
+        localStorage.removeItem(IDENTITY_STORAGE_KEY);
+        console.log("[identity] Migrated legacy identity to secure storage and removed from localStorage");
+      }
+    }
+  } catch {
+    console.warn("[identity] Failed to migrate legacy identity");
+  }
+}
+
+// ─── WebCrypto fallback (non-Electron / browser) ─────────────────────────────
+
 async function generateIdentityKeyPair(): Promise<{ keyPair: CryptoKeyPair; algorithm: string }> {
   try {
     const keyPair = await crypto.subtle.generateKey(
@@ -17,7 +56,6 @@ async function generateIdentityKeyPair(): Promise<{ keyPair: CryptoKeyPair; algo
     );
     return { keyPair, algorithm: "Ed25519" };
   } catch {
-    // Ed25519 not supported — fall back to ECDSA P-256
     const keyPair = await crypto.subtle.generateKey(
       { name: "ECDSA", namedCurve: "P-256" },
       true,
@@ -28,7 +66,6 @@ async function generateIdentityKeyPair(): Promise<{ keyPair: CryptoKeyPair; algo
 }
 
 async function exportPublicKeyHex(key: CryptoKey): Promise<string> {
-  // Use SPKI format — works for both Ed25519 and ECDSA
   const spki = await crypto.subtle.exportKey("spki", key);
   return arrayBufferToHex(spki);
 }
@@ -50,29 +87,27 @@ async function importPrivateKey(hex: string, algorithm: string): Promise<CryptoK
   return crypto.subtle.importKey("pkcs8", pkcs8, getImportAlgorithm(algorithm), true, ["sign"]);
 }
 
-async function importPublicKey(hex: string, algorithm: string): Promise<CryptoKey> {
+async function importPublicKeyFromHex(hex: string, algorithm: string): Promise<CryptoKey> {
   const spki = hexToArrayBuffer(hex);
   return crypto.subtle.importKey("spki", spki, getImportAlgorithm(algorithm), true, ["verify"]);
 }
 
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 export async function getOrCreateIdentity(): Promise<{
-  keyPair: CryptoKeyPair;
   publicKeyHex: string;
 }> {
-  const stored = loadStoredIdentity();
+  // Secure path: Electron main process holds the private key
+  if (hasSecureIdentity) {
+    await migrateLegacyIdentity();
+    const publicKeyHex = await raddir!.identityGetPublicKey!();
+    return { publicKeyHex };
+  }
 
+  // Fallback path: WebCrypto in renderer (browser-only, less secure)
+  const stored = loadStoredIdentity();
   if (stored) {
-    try {
-      const algo = stored.algorithm ?? "Ed25519";
-      const privateKey = await importPrivateKey(stored.privateKey, algo);
-      const publicKey = await importPublicKey(stored.publicKey, algo);
-      return {
-        keyPair: { privateKey, publicKey },
-        publicKeyHex: stored.publicKey,
-      };
-    } catch {
-      console.warn("[identity] Failed to load stored identity, generating new one");
-    }
+    return { publicKeyHex: stored.publicKey };
   }
 
   const { keyPair, algorithm } = await generateIdentityKeyPair();
@@ -86,8 +121,8 @@ export async function getOrCreateIdentity(): Promise<{
     createdAt: Date.now(),
   });
 
-  console.log(`[identity] Generated ${algorithm} identity key`);
-  return { keyPair, publicKeyHex };
+  console.log(`[identity] Generated ${algorithm} identity key (browser fallback)`);
+  return { publicKeyHex };
 }
 
 /**
@@ -122,7 +157,14 @@ export function computeFingerprint(publicKey: string): string {
   return publicKey.slice(0, 16).toUpperCase().match(/.{1,4}/g)?.join(" ") ?? "";
 }
 
-export function getStoredIdentityPublicKey(): string | null {
+export async function getStoredIdentityPublicKey(): Promise<string | null> {
+  if (hasSecureIdentity) {
+    try {
+      return await raddir!.identityGetPublicKey!();
+    } catch {
+      return null;
+    }
+  }
   const stored = loadStoredIdentity();
   return stored?.publicKey ?? null;
 }
@@ -136,16 +178,26 @@ function getSignAlgorithm(algorithm: string): AlgorithmIdentifier | EcdsaParams 
 
 /**
  * Sign arbitrary data with the identity private key.
- * Returns the signature as a base64 string.
+ * In Electron: delegates to main process (private key never in renderer).
+ * In browser: uses WebCrypto fallback.
+ * Returns the signature as a base64 string, or null on failure.
  */
 export async function signData(data: string): Promise<string | null> {
   try {
-    const identity = await getOrCreateIdentity();
-    const algo = loadStoredIdentity()?.algorithm ?? "Ed25519";
+    // Secure path: main process signing
+    if (hasSecureIdentity) {
+      return await raddir!.identitySign!(data);
+    }
+
+    // Fallback: WebCrypto (browser)
+    const stored = loadStoredIdentity();
+    if (!stored) return null;
+    const algo = stored.algorithm ?? "Ed25519";
+    const privateKey = await importPrivateKey(stored.privateKey, algo);
     const encoded = new TextEncoder().encode(data);
     const signature = await crypto.subtle.sign(
       getSignAlgorithm(algo),
-      identity.keyPair.privateKey,
+      privateKey,
       encoded
     );
     return arrayBufferToBase64(signature);
@@ -156,6 +208,7 @@ export async function signData(data: string): Promise<string | null> {
 
 /**
  * Verify a signature against data using a public key (SPKI hex).
+ * Verification always happens in the renderer (only needs the public key).
  */
 export async function verifySignature(
   data: string,
@@ -164,8 +217,8 @@ export async function verifySignature(
   algorithm?: string
 ): Promise<boolean> {
   try {
-    const algo = algorithm ?? loadStoredIdentity()?.algorithm ?? "Ed25519";
-    const publicKey = await importPublicKey(publicKeyHex, algo);
+    const algo = algorithm ?? "Ed25519";
+    const publicKey = await importPublicKeyFromHex(publicKeyHex, algo);
     const encoded = new TextEncoder().encode(data);
     const signature = base64ToArrayBuffer(signatureBase64);
     return crypto.subtle.verify(
@@ -195,24 +248,15 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 
 // ─── Identity Export / Import (passphrase-encrypted) ─────────────────────────
 
-async function deriveKeyFromPassphrase(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(passphrase),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: salt as BufferSource, iterations: 600_000, hash: "SHA-256" },
-    keyMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
-
 export async function exportIdentity(passphrase: string): Promise<string> {
+  // Secure path: main process handles export
+  if (hasSecureIdentity) {
+    const result = await raddir!.identityExport!(passphrase);
+    if (!result) throw new Error("No identity to export");
+    return result;
+  }
+
+  // Fallback: WebCrypto (browser)
   const stored = loadStoredIdentity();
   if (!stored) throw new Error("No identity to export");
 
@@ -233,6 +277,15 @@ export async function exportIdentity(passphrase: string): Promise<string> {
 
 export async function importIdentity(fileContents: string, passphrase: string): Promise<void> {
   const file = JSON.parse(fileContents);
+
+  // v2 format: handled by main process
+  if (file.version === 2 && hasSecureIdentity) {
+    const result = await raddir!.identityImportEncrypted!(fileContents, passphrase);
+    if (!result.success) throw new Error(result.error ?? "Import failed");
+    return;
+  }
+
+  // v1 format: WebCrypto fallback (browser) or legacy
   if (file.version !== 1) throw new Error("Unsupported identity file version");
 
   const salt = new Uint8Array(hexToArrayBuffer(file.salt));
@@ -247,7 +300,30 @@ export async function importIdentity(fileContents: string, passphrase: string): 
     throw new Error("Invalid identity file");
   }
 
+  // If Electron is available, migrate to secure storage
+  if (hasSecureIdentity) {
+    const imported = await raddir!.identityImportLegacy!(identity.publicKey, identity.privateKey, identity.algorithm ?? "Ed25519");
+    if (imported) return;
+  }
+
   saveIdentity(identity);
+}
+
+async function deriveKeyFromPassphrase(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: salt as BufferSource, iterations: 600_000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
 
 function loadStoredIdentity(): LocalIdentity | null {

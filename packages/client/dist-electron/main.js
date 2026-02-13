@@ -1,7 +1,8 @@
 import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, safeStorage, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { createSign, generateKeyPairSync } from "node:crypto";
 const __filename$1 = fileURLToPath(import.meta.url);
 const __dirname$1 = dirname(__filename$1);
 let mainWindow = null;
@@ -108,6 +109,132 @@ ipcMain.handle("safe-storage-decrypt", (_event, encrypted) => {
 });
 ipcMain.handle("get-theme", () => {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+});
+let cachedIdentity = null;
+function getIdentityFilePath() {
+  const dir = join(app.getPath("userData"), "identity");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return join(dir, "identity.json");
+}
+function loadIdentity() {
+  if (cachedIdentity) return cachedIdentity;
+  const filePath = getIdentityFilePath();
+  if (!existsSync(filePath)) return null;
+  try {
+    const stored = JSON.parse(readFileSync(filePath, "utf-8"));
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const privateKeyPem = safeStorage.decryptString(Buffer.from(stored.encryptedPrivateKey, "base64"));
+    cachedIdentity = { publicKeyHex: stored.publicKeyHex, privateKeyPem, algorithm: stored.algorithm };
+    return cachedIdentity;
+  } catch {
+    return null;
+  }
+}
+function generateAndStoreIdentity() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyDer = publicKey.export({ type: "spki", format: "der" });
+  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+  const publicKeyHex = publicKeyDer.toString("hex");
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("safeStorage not available — cannot store identity securely");
+  }
+  const encryptedPrivateKey = safeStorage.encryptString(privateKeyPem).toString("base64");
+  const stored = {
+    publicKeyHex,
+    encryptedPrivateKey,
+    algorithm: "Ed25519",
+    createdAt: Date.now()
+  };
+  writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
+  cachedIdentity = { publicKeyHex, privateKeyPem, algorithm: "Ed25519" };
+  return cachedIdentity;
+}
+ipcMain.handle("identity-get-public-key", () => {
+  const id = loadIdentity() ?? generateAndStoreIdentity();
+  return id.publicKeyHex;
+});
+ipcMain.handle("identity-sign", (_event, data) => {
+  const id = loadIdentity() ?? generateAndStoreIdentity();
+  const sign = createSign("Ed25519");
+  sign.end(Buffer.from(data, "utf-8"));
+  return sign.sign(id.privateKeyPem).toString("base64");
+});
+ipcMain.handle("identity-get-algorithm", () => {
+  const id = loadIdentity() ?? generateAndStoreIdentity();
+  return id.algorithm;
+});
+ipcMain.handle("identity-import-legacy", (_event, publicKeyHex, privateKeyHex, algorithm) => {
+  if (loadIdentity()) return false;
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  try {
+    const derBuffer = Buffer.from(privateKeyHex, "hex");
+    const b64 = derBuffer.toString("base64");
+    const pem = `-----BEGIN PRIVATE KEY-----
+${b64.match(/.{1,64}/g).join("\n")}
+-----END PRIVATE KEY-----`;
+    const encryptedPrivateKey = safeStorage.encryptString(pem).toString("base64");
+    const stored = {
+      publicKeyHex,
+      encryptedPrivateKey,
+      algorithm,
+      createdAt: Date.now()
+    };
+    writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
+    cachedIdentity = { publicKeyHex, privateKeyPem: pem, algorithm };
+    return true;
+  } catch (err) {
+    console.error("[identity] Failed to import legacy identity:", err);
+    return false;
+  }
+});
+ipcMain.handle("identity-export", (_event, passphrase) => {
+  const id = loadIdentity();
+  if (!id) return null;
+  const crypto = require("node:crypto");
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = crypto.pbkdf2Sync(passphrase, salt, 6e5, 32, "sha256");
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = JSON.stringify({ publicKey: id.publicKeyHex, privateKeyPem: id.privateKeyPem, algorithm: id.algorithm });
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    version: 2,
+    salt: salt.toString("hex"),
+    iv: iv.toString("hex"),
+    data: Buffer.concat([encrypted, tag]).toString("hex")
+  });
+});
+ipcMain.handle("identity-import-encrypted", (_event, fileContents, passphrase) => {
+  try {
+    const file = JSON.parse(fileContents);
+    if (file.version !== 2) return { success: false, error: "Unsupported identity file version" };
+    const crypto = require("node:crypto");
+    const salt = Buffer.from(file.salt, "hex");
+    const iv = Buffer.from(file.iv, "hex");
+    const raw = Buffer.from(file.data, "hex");
+    const tag = raw.subarray(raw.length - 16);
+    const ciphertext = raw.subarray(0, raw.length - 16);
+    const key = crypto.pbkdf2Sync(passphrase, salt, 6e5, 32, "sha256");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf-8");
+    const identity = JSON.parse(plaintext);
+    if (!identity.publicKey || !identity.privateKeyPem) return { success: false, error: "Invalid identity file" };
+    if (!safeStorage.isEncryptionAvailable()) return { success: false, error: "Secure storage unavailable" };
+    const encryptedPrivateKey = safeStorage.encryptString(identity.privateKeyPem).toString("base64");
+    const stored = {
+      publicKeyHex: identity.publicKey,
+      encryptedPrivateKey,
+      algorithm: identity.algorithm ?? "Ed25519",
+      createdAt: Date.now()
+    };
+    writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
+    cachedIdentity = { publicKeyHex: identity.publicKey, privateKeyPem: identity.privateKeyPem, algorithm: identity.algorithm ?? "Ed25519" };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message ?? "Decryption failed" };
+  }
 });
 nativeTheme.on("updated", () => {
   mainWindow == null ? void 0 : mainWindow.webContents.send("theme-changed", nativeTheme.shouldUseDarkColors ? "dark" : "light");
