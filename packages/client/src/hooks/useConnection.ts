@@ -82,8 +82,7 @@ export function useConnection() {
     });
 
     signalingClient.onDisconnect(() => {
-      store.getState().setConnected(false);
-      store.getState().setAuthenticated(false);
+      store.getState().reset();
       keyManager?.reset();
       setConnecting(false);
     });

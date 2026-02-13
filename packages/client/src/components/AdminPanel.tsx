@@ -237,10 +237,20 @@ function InviteAdmin() {
   const [inviteBlob, setInviteBlob] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
-    if (!serverId || !userId) return;
+    const { savedServers, serverUrl: currentUrl } = useSettingsStore.getState();
+    const matchedServer = savedServers.find((s) => s.address === currentUrl);
+    console.log("[admin] handleCreate called, serverId:", serverId, "userId:", userId,
+      "serverUrl:", currentUrl, "matchedServer:", matchedServer?.name,
+      "hasAdminToken:", !!matchedServer?.adminToken, "headers:", getAuthHeaders());
+    if (!serverId || !userId) {
+      setError("Not connected (serverId=" + serverId + ", userId=" + userId + ")");
+      return;
+    }
     setCreating(true);
+    setError(null);
     try {
       const { serverUrl } = useSettingsStore.getState();
       // Strip protocol and /ws path to get the raw address
@@ -256,9 +266,14 @@ function InviteAdmin() {
       if (res.ok) {
         const data = await res.json();
         setInviteBlob(data.inviteBlob);
+      } else {
+        const body = await res.text();
+        console.error("[admin] Invite creation failed:", res.status, body);
+        setError(`Server error ${res.status}: ${body}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("[admin] Failed to create invite:", err);
+      setError(`Network error: ${err.message}`);
     }
     setCreating(false);
   };
@@ -297,6 +312,10 @@ function InviteAdmin() {
             </button>
           </div>
         </div>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-400 bg-red-900/20 px-3 py-2 rounded">{error}</p>
       )}
 
       <p className="text-[10px] text-surface-500">

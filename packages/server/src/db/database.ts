@@ -291,6 +291,39 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
     `,
   },
+  {
+    name: "009_unique_credential_hash",
+    sql: `
+      -- Replace plain index with unique partial index on active credentials.
+      DROP INDEX IF EXISTS idx_session_creds_hash;
+      CREATE UNIQUE INDEX idx_session_creds_hash ON session_credentials(credential_hash)
+        WHERE credential_hash IS NOT NULL AND revoked_at IS NULL;
+    `,
+  },
+  {
+    name: "010_drop_plaintext_credential",
+    sql: `
+      -- Remove plaintext credential column — only credential_hash is used now.
+      CREATE TABLE session_credentials_v3 (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        user_public_key TEXT,
+        credential_hash TEXT,
+        invite_token_id TEXT REFERENCES invite_tokens(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        revoked_at INTEGER,
+        bound_at INTEGER
+      );
+      INSERT INTO session_credentials_v3 (id, server_id, user_public_key, credential_hash, invite_token_id, created_at, revoked_at, bound_at)
+        SELECT id, server_id, user_public_key, credential_hash, invite_token_id, created_at, revoked_at, bound_at
+        FROM session_credentials;
+      DROP TABLE session_credentials;
+      ALTER TABLE session_credentials_v3 RENAME TO session_credentials;
+      CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
+      CREATE UNIQUE INDEX idx_session_creds_hash ON session_credentials(credential_hash)
+        WHERE credential_hash IS NOT NULL AND revoked_at IS NULL;
+    `,
+  },
 ];
 
 export function closeDb(): void {

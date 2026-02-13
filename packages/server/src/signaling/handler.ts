@@ -159,32 +159,9 @@ async function handleAuth(
       const db = getDb();
       const credHash = hashCredential(msg.credential);
 
-      // Try hash lookup first (new credentials), then plaintext fallback (legacy)
-      let cred = db.prepare(
+      const cred = db.prepare(
         "SELECT id, user_public_key FROM session_credentials WHERE credential_hash = ? AND server_id = ? AND revoked_at IS NULL"
       ).get(credHash, server.id) as any;
-
-      if (!cred) {
-        // Fallback: legacy plaintext credential — upgrade to hash on successful auth
-        cred = db.prepare(
-          "SELECT id, user_public_key FROM session_credentials WHERE credential = ? AND server_id = ? AND revoked_at IS NULL"
-        ).get(msg.credential, server.id) as any;
-        if (cred) {
-          // Upgrade: store hash and clear plaintext (best-effort — may fail on old schema)
-          try {
-            db.prepare(
-              "UPDATE session_credentials SET credential_hash = ?, credential = NULL WHERE id = ?"
-            ).run(credHash, cred.id);
-          } catch {
-            // Old schema with NOT NULL on credential — just store the hash alongside
-            try {
-              db.prepare(
-                "UPDATE session_credentials SET credential_hash = ? WHERE id = ?"
-              ).run(credHash, cred.id);
-            } catch { /* ignore — upgrade will happen after migration 008 */ }
-          }
-        }
-      }
 
       if (cred) {
         if (!cred.user_public_key) {
@@ -212,6 +189,13 @@ async function handleAuth(
         }
         // If bound to a different publicKey, authentication fails (credential stolen)
       }
+    }
+
+    // Explicit error: credential without publicKey
+    if (!authenticated && msg.credential && !msg.publicKey) {
+      send(ws, { type: "auth-result", success: false, error: "publicKey is required for credential authentication" });
+      ws.close();
+      return { ws, userId: "", nickname: "", serverId: null, channelId: null, isMuted: false, isDeafened: false, isAdmin: false } as ConnectedClient;
     }
 
     if (!authenticated) {
