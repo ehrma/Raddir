@@ -67,33 +67,63 @@ export function useAudio() {
 
         // Wire E2EE key to frame encryption and track active state
         const km = getKeyManager();
-        if (km) {
-          const serverId = useServerStore.getState().serverId;
-          if (serverId) {
-            km.setChannelContext(data.channelId, serverId);
-          }
-
-          const key = km.getChannelKey();
-          setFrameEncryptionKey(key);
-          useVoiceStore.getState().setE2eeActive(!!key, km.getKeyEpoch());
-          km.onKeyChanged((newKey, epoch) => {
-            setFrameEncryptionKey(newKey);
-            useVoiceStore.getState().setE2eeActive(!!newKey, epoch);
-          });
-          km.announcePublicKey();
-
-          // Deterministic key holder election based on min(hash(identityPublicKey))
-          const memberIds = (data.users ?? []).map((u: any) => u.id).concat(currentUserId!);
-          await km.electKeyHolder(currentUserId!, memberIds);
+        if (!km) {
+          console.error("[audio] KeyManager not available — cannot establish E2EE, aborting audio");
+          return;
         }
+
+        const serverId = useServerStore.getState().serverId;
+        if (serverId) {
+          km.setChannelContext(data.channelId, serverId);
+        }
+
+        km.onKeyChanged((newKey, epoch) => {
+          setFrameEncryptionKey(newKey);
+          useVoiceStore.getState().setE2eeActive(!!newKey, epoch);
+        });
+        km.announcePublicKey();
+
+        // Deterministic key holder election based on min(hash(identityPublicKey))
+        const memberIds = (data.users ?? []).map((u: any) => u.id).concat(currentUserId!);
+        await km.electKeyHolder(currentUserId!, memberIds);
+
+        // Wait for E2EE key before producing/consuming audio.
+        // If the key doesn't arrive within 10s, abort — never transmit unencrypted.
+        let e2eeKey = km.getChannelKey();
+        if (!e2eeKey) {
+          console.log("[audio] Waiting for E2EE channel key before enabling audio...");
+          e2eeKey = await new Promise<CryptoKey | null>((resolve) => {
+            const timeout = setTimeout(() => {
+              unsub();
+              resolve(null);
+            }, 10_000);
+            const unsub = km.onKeyChanged((newKey) => {
+              if (newKey) {
+                clearTimeout(timeout);
+                unsub();
+                resolve(newKey);
+              }
+            });
+          });
+        }
+
+        if (!e2eeKey) {
+          console.error("[audio] E2EE key not established within timeout — aborting audio (will not transmit unencrypted)");
+          useVoiceStore.getState().setE2eeActive(false, 0);
+          return;
+        }
+
+        setFrameEncryptionKey(e2eeKey);
+        useVoiceStore.getState().setE2eeActive(true, km.getKeyEpoch());
+        console.log("[audio] E2EE key established, enabling audio");
 
         // Capture mic
         await startMicrophone(deviceId);
 
-        // Produce audio
+        // Produce audio (E2EE key is guaranteed non-null at this point)
         if (localStream) {
           await mediaClient.produce(localStream);
-          console.log("[audio] Producing audio");
+          console.log("[audio] Producing audio (E2EE active)");
 
           // If user is already muted, pause the producer immediately
           const { isMuted } = useVoiceStore.getState();
@@ -130,6 +160,13 @@ export function useAudio() {
       if (!mediaReady || !mediaClient) {
         // Queue for later — setup is still in progress
         pendingProducers.push({ producerId: data.producerId, userId: data.userId });
+        return;
+      }
+
+      // Only consume if E2EE key is active
+      const km2 = getKeyManager();
+      if (!km2?.getChannelKey()) {
+        console.warn("[audio] Rejecting new-producer from", data.userId, "— no E2EE key");
         return;
       }
 
