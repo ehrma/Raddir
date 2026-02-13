@@ -72,13 +72,36 @@ Raddir uses **two layers** of encryption for voice and text:
 - **Member joins**: The existing channel key is shared with the new member. They cannot decrypt audio from before they joined.
 - **Periodic ratchet**: Optional HKDF-based key chain for long-lived channels.
 
+### Identity Keys & Signing
+
+- Each client has a long-lived **ECDSA P-256 identity keypair** stored in the Electron main process via `safeStorage` (never in `localStorage`)
+- **All E2EE control messages** (`public-key-announce`, `encrypted-channel-key`, `key-ratchet`) are **mandatorily signed** with the sender's identity key
+- Signatures include **channel context** (`channelId` + `serverId`) to prevent replay/misroute across channels or servers
+- Unsigned, context-mismatched, or invalid-signature messages are **hard-rejected**
+
+### TOFU Identity Pinning
+
+- On first contact with a peer on a given server, the peer's identity public key is **pinned** (Trust On First Use)
+- Pinned keys are persisted per server in the Electron app data directory (`userData/identity-pins/<serverId>.json`)
+- On subsequent sessions, if a peer's identity key **changes**, all E2EE messages from that peer are **hard-rejected** (possible MITM)
+- This prevents a malicious server from substituting identity keys after initial contact
+
 ### Identity Verification
 
-- Each client has a long-lived **Ed25519 identity keypair** stored locally
-- A **safety number** (fingerprint) is derived from both parties' public keys
+- A **safety number** (fingerprint) is derived from both parties' identity public keys
 - Users can compare safety numbers out-of-band (e.g., in person, via secure channel)
 - The UI shows a lock icon and verification status per user
-- This protects against man-in-the-middle attacks on the key exchange
+
+### E2EE Enforcement for Voice
+
+- Audio **will not transmit or receive** until the E2EE channel key is established
+- If the key is not established within 10 seconds, audio setup **aborts** — no unencrypted fallback
+- Late-arriving producers are also rejected if no E2EE key is active
+
+### Key-Holder Election
+
+- The key holder is elected deterministically by `min(SHA-256(identityPublicKey))` across channel members
+- This is not gameable by the server (it cannot influence identity key hashes)
 
 ## Cryptographic Primitives
 
@@ -87,8 +110,10 @@ Raddir uses **two layers** of encryption for voice and text:
 | Frame encryption | AES-256-GCM | NIST SP 800-38D |
 | Key exchange | ECDH P-256 | NIST FIPS 186-4 |
 | Key derivation | HKDF-SHA-256 | RFC 5869 |
-| Identity keys | Ed25519 | RFC 8032 |
-| All crypto | Web Crypto API | W3C (hardware-accelerated) |
+| Identity keys | ECDSA P-256 + SHA-256 | NIST FIPS 186-4 |
+| Identity key storage | Electron safeStorage (OS keychain) | Platform-specific |
+| TOFU pinning | Per-server persistent pin store | SSH-style TOFU |
+| All crypto | Web Crypto API + Node.js crypto | W3C / OpenSSL |
 
 No third-party crypto libraries are used. All operations run in the browser's native Web Crypto API, which leverages hardware acceleration (AES-NI on x86, ARMv8 crypto extensions).
 
@@ -145,12 +170,77 @@ A partial UNIQUE index on `users.public_key` (where not NULL) prevents duplicate
 | Threat | Mitigated? | How |
 |---|---|---|
 | Network eavesdropper | ✅ | DTLS-SRTP + WSS |
-| Compromised server | ✅ | E2EE — server cannot decrypt content |
-| Man-in-the-middle | ✅ | Identity verification via safety numbers |
+| Compromised server (passive) | ✅ | E2EE — server cannot decrypt content |
+| Compromised server (active MITM, after first contact) | ✅ | TOFU pinning — identity key substitution is detected and rejected |
+| Compromised server (active MITM, first contact) | ⚠️ **Accepted risk** | See "Known Limitations" below |
+| Man-in-the-middle (after verification) | ✅ | Identity verification via safety numbers |
 | Compromised client device | ❌ | Out of scope — if your device is compromised, all bets are off |
 | Traffic analysis | ⚠️ Partial | Server sees packet timing/size; mitigating this requires onion routing (out of scope) |
 | Key compromise (past) | ✅ | Forward secrecy via key ratcheting on member leave |
 | Key compromise (future) | ✅ | New keys on member join; periodic ratchet |
+| E2EE not engaging silently | ✅ | Voice TX/RX blocked until E2EE key established; no unencrypted fallback |
+
+## Known Limitations & Accepted Risks
+
+### 🚨 TOFU First-Contact MITM
+
+Identity pinning uses **Trust On First Use (TOFU)**, the same model as SSH. On first contact with a peer, whatever identity key is seen first gets pinned. A malicious signaling server (or active attacker controlling signaling) can still MITM the **very first time** two peers meet by presenting attacker keys first, which then get pinned.
+
+This is **inherent to TOFU** and cannot be fixed without adding a trust anchor. Possible future mitigations:
+
+1. **Out-of-band verification (safety number / QR scan)** — users confirm each other's identity fingerprints before trusting the pin. This is the Signal/WhatsApp approach.
+2. **Server-signed identity directory** — trust the server as a CA that vouches for identity keys. Weaker (trusts server) but easier UX.
+3. **Pre-shared / published identity fingerprints** — users exchange fingerprints via a trusted channel before first contact.
+
+Until one of these is implemented, E2EE protects against **passive observers** and **post-first-contact active attackers**, but not against an active MITM during the very first key exchange between two peers.
+
+### ✅ ~~Signaling Flood / DoS~~ (Fixed)
+
+~~WebSocket message size is capped at 64 KB, but an authenticated client could flood messages at high frequency.~~
+
+**Fixed:** Per-connection post-auth rate limiting is now enforced in the signaling handler. Messages are categorized and limited per second:
+
+| Category | Message types | Limit |
+|---|---|---|
+| chat | `chat-message` | 5/sec |
+| e2ee | `e2ee` | 10/sec |
+| speaking | `speaking` | 20/sec |
+| media | `create-transport`, `connect-transport`, `produce`, `consume`, `resume-consumer` | 5/sec |
+| general | everything else | 30/sec |
+
+Exceeding the limit returns a `RATE_LIMITED` error and drops the message. Counters are per-WebSocket connection and garbage-collected on disconnect.
+
+### ⚠️ Identity Pinning Keyed by Server-Assigned userId (High)
+
+TOFU pins are stored as `(serverId, userId) → identityPublicKey`. The `userId` is assigned by the server. If the server can remap user identities (malicious or buggy) or if `userId` values aren't stable across sessions, pinning can be undermined — the server could assign a victim's `userId` to an attacker.
+
+**Possible fixes:**
+- Pin by a stable identifier that's not server-mutable (e.g., the peer's long-term identity key fingerprint after first contact)
+- Or cryptographically bind `userId` to the identity public key at registration time
+- At minimum, explicitly state in the threat model: "server assigns stable `userId` per identity/publicKey" (currently enforced by the partial UNIQUE index on `users.public_key`)
+
+### ⚠️ Safety Number Entropy Is Low (Medium)
+
+The current safety number is 12 digits derived from 5 bytes (~40 bits of entropy). This is adequate for casual visual verification but significantly weaker than Signal-style safety numbers (~220 bits).
+
+**Needed fix:** Derive a longer number with more entropy (e.g., 80–128 bits worth of digits or words).
+
+### ✅ ~~Member List Field Name Mismatch~~ (Fixed)
+
+~~`useAudio.ts` used `u.id` instead of `u.userId`, breaking key-holder election.~~
+
+**Fixed:** Changed to `u.userId` to match the server's `SessionInfo` shape. Key-holder election now works correctly with the actual member list.
+
+### ⚠️ Self-Signed Certificate Trust via IPC (Check Your Stance)
+
+Electron's `certificate-error` handler allows TLS bypass for a host set via the `trust-server-host` IPC call. This is intentional for self-hosted servers with self-signed certs, but it's an attack surface if:
+- The renderer can be tricked into trusting a hostile host (phishing)
+- The app ever loads arbitrary remote content
+
+**Hardening recommendations:**
+- Never load arbitrary remote content in the renderer (only the bundled app)
+- Only invoke `trust-server-host` as part of an explicit "trust this server" UI flow with user confirmation
+- Ideally, store and pin the **certificate fingerprint**, not just the hostname
 
 ## Comparison
 

@@ -84,7 +84,7 @@ export function useAudio() {
         km.announcePublicKey();
 
         // Deterministic key holder election based on min(hash(identityPublicKey))
-        const memberIds = (data.users ?? []).map((u: any) => u.id).concat(currentUserId!);
+        const memberIds = (data.users ?? []).map((u: any) => u.userId).concat(currentUserId!);
         await km.electKeyHolder(currentUserId!, memberIds);
 
         // Wait for E2EE key before producing/consuming audio.

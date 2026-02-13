@@ -80,6 +80,49 @@ let serverConfig: RaddirConfig;
 const authLimiter = new RateLimiter(10, 60_000);
 authLimiter.startCleanup();
 
+// Per-connection post-auth rate limits (messages per second per category)
+const MSG_RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
+  chat:     { max: 5,  windowMs: 1_000 },
+  e2ee:     { max: 10, windowMs: 1_000 },
+  speaking: { max: 20, windowMs: 1_000 },
+  media:    { max: 5,  windowMs: 1_000 },
+  general:  { max: 30, windowMs: 1_000 },
+};
+
+function getMsgCategory(type: string): string {
+  switch (type) {
+    case "chat-message": return "chat";
+    case "e2ee": return "e2ee";
+    case "speaking": return "speaking";
+    case "create-transport":
+    case "connect-transport":
+    case "produce":
+    case "consume":
+    case "resume-consumer": return "media";
+    default: return "general";
+  }
+}
+
+function checkMsgRate(counters: Map<string, number[]>, type: string): boolean {
+  const category = getMsgCategory(type);
+  const limit = MSG_RATE_LIMITS[category] ?? MSG_RATE_LIMITS["general"]!;
+  const now = Date.now();
+  const cutoff = now - limit.windowMs;
+  let timestamps = counters.get(category);
+  if (timestamps) {
+    timestamps = timestamps.filter((t) => t > cutoff);
+  } else {
+    timestamps = [];
+  }
+  if (timestamps.length >= limit.max) {
+    counters.set(category, timestamps);
+    return false;
+  }
+  timestamps.push(now);
+  counters.set(category, timestamps);
+  return true;
+}
+
 export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): void {
   serverConfig = config;
   const wss = new WebSocketServer({
@@ -95,6 +138,7 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
         : undefined)
       || req.socket.remoteAddress
       || "unknown";
+    const msgCounters = new Map<string, number[]>();
 
     ws.on("message", async (raw) => {
       let msg: ClientMessage;
@@ -116,6 +160,11 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
         } else if (!client) {
           send(ws, { type: "error", code: "NOT_AUTHENTICATED", message: "Authenticate first" });
         } else {
+          // Per-connection post-auth rate limiting
+          if (!checkMsgRate(msgCounters, msg.type)) {
+            send(ws, { type: "error", code: "RATE_LIMITED", message: `Rate limited (${getMsgCategory(msg.type)})` });
+            return;
+          }
           await handleMessage(client, msg);
         }
       } catch (err: any) {
