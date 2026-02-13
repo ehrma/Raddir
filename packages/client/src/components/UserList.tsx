@@ -2,16 +2,20 @@ import { useState } from "react";
 import { useServerStore } from "../stores/serverStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useVerificationStore } from "../stores/verificationStore";
-import { Mic, MicOff, VolumeX, Volume2, ShieldCheck } from "lucide-react";
+import { Mic, MicOff, VolumeX, Volume2, ShieldCheck, Camera, Monitor } from "lucide-react";
 import { cn } from "../lib/cn";
 import { VolumeSlider } from "./VolumeSlider";
 import { VerifyUserDialog } from "./VerifyUserDialog";
 import { getApiBase } from "../lib/api-base";
+import { useVideoStore } from "../stores/videoStore";
 
 export function UserList() {
   const { currentChannelId, members, userId } = useServerStore();
   const { speakingUsers } = useVoiceStore();
   const { isVerified } = useVerificationStore();
+  const remoteVideos = useVideoStore((s) => s.remoteVideos);
+  const localWebcamActive = useVideoStore((s) => s.webcamActive);
+  const localScreenActive = useVideoStore((s) => s.screenShareActive);
 
   const channelMembers = Array.from(members.values()).filter(
     (m) => m.channelId === currentChannelId
@@ -80,6 +84,12 @@ export function UserList() {
               )}
 
               <div className="flex items-center gap-1">
+                {(isMe ? localWebcamActive : remoteVideos.has(`${member.userId}:webcam`)) && (
+                  <Camera className="w-3 h-3 text-green-400" />
+                )}
+                {(isMe ? localScreenActive : remoteVideos.has(`${member.userId}:screen`)) && (
+                  <Monitor className="w-3 h-3 text-green-400" />
+                )}
                 {member.isMuted && (
                   <MicOff className="w-3 h-3 text-red-400" />
                 )}

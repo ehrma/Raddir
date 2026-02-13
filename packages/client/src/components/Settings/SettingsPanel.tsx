@@ -4,14 +4,16 @@ import { KeybindSettings } from "./KeybindSettings";
 import { IdentitySettings } from "./IdentitySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ProfileSettings } from "./ProfileSettings";
-import { X, Volume2, Keyboard, Shield, Palette, User } from "lucide-react";
+import { VideoSettings } from "./VideoSettings";
+import { X, Volume2, Keyboard, Shield, Palette, User, Video } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-type Tab = "profile" | "audio" | "keybinds" | "identity" | "appearance";
+type Tab = "profile" | "audio" | "video" | "keybinds" | "identity" | "appearance";
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "profile", label: "Profile", icon: <User className="w-4 h-4" /> },
   { id: "audio", label: "Audio", icon: <Volume2 className="w-4 h-4" /> },
+  { id: "video", label: "Video", icon: <Video className="w-4 h-4" /> },
   { id: "keybinds", label: "Keybinds", icon: <Keyboard className="w-4 h-4" /> },
   { id: "appearance", label: "Appearance", icon: <Palette className="w-4 h-4" /> },
   { id: "identity", label: "Identity", icon: <Shield className="w-4 h-4" /> },
@@ -58,6 +60,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <div className="flex-1 p-5 min-h-0 overflow-y-auto">
             {activeTab === "profile" && <ProfileSettings />}
             {activeTab === "audio" && <AudioSettings />}
+            {activeTab === "video" && <VideoSettings />}
             {activeTab === "keybinds" && <KeybindSettings />}
             {activeTab === "appearance" && <AppearanceSettings />}
             {activeTab === "identity" && <IdentitySettings />}

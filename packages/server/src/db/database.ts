@@ -342,6 +342,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE users ADD COLUMN avatar_path TEXT DEFAULT NULL;
     `,
   },
+  {
+    name: "014_video_producer_limits",
+    sql: `
+      ALTER TABLE servers ADD COLUMN max_webcam_producers INTEGER NOT NULL DEFAULT 5;
+      ALTER TABLE servers ADD COLUMN max_screen_producers INTEGER NOT NULL DEFAULT 1;
+    `,
+  },
 ];
 
 export function closeDb(): void {

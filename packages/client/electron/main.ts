@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage, session } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage, session } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
@@ -154,6 +154,20 @@ ipcMain.handle("safe-storage-decrypt", (_event, encrypted: string) => {
 // IPC: Get system theme
 ipcMain.handle("get-theme", () => {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+});
+
+// IPC: Get desktop sources for screen sharing (Electron desktopCapturer)
+ipcMain.handle("get-desktop-sources", async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen", "window"],
+    thumbnailSize: { width: 320, height: 180 },
+  });
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    thumbnailDataUrl: s.thumbnail.toDataURL(),
+    display_id: s.display_id,
+  }));
 });
 
 // ─── Identity Key Management (main process only) ────────────────────────────

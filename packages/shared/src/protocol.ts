@@ -57,8 +57,14 @@ export interface ClientConnectTransportMessage {
 export interface ClientProduceMessage {
   type: "produce";
   transportId: string;
-  kind: "audio";
+  kind: "audio" | "video";
   rtpParameters: object;
+  mediaType?: "mic" | "webcam" | "screen";
+}
+
+export interface ClientStopProducerMessage {
+  type: "stop-producer";
+  producerId: string;
 }
 
 export interface ClientConsumeMessage {
@@ -69,6 +75,13 @@ export interface ClientConsumeMessage {
 export interface ClientResumeConsumerMessage {
   type: "resume-consumer";
   consumerId: string;
+}
+
+export interface ClientSetPreferredLayersMessage {
+  type: "set-preferred-layers";
+  consumerId: string;
+  spatialLayer: number;
+  temporalLayer?: number;
 }
 
 export interface ClientChatMessage {
@@ -139,7 +152,9 @@ export type ClientMessage =
   | ClientBanMessage
   | ClientSpeakingMessage
   | ClientAssignRoleMessage
-  | ClientUnassignRoleMessage;
+  | ClientUnassignRoleMessage
+  | ClientStopProducerMessage
+  | ClientSetPreferredLayersMessage;
 
 // ─── Server → Client Messages ───────────────────────────────────────────────
 
@@ -156,6 +171,8 @@ export interface ServerJoinedServerMessage {
   serverName: string;
   serverDescription: string;
   serverIconUrl: string | null;
+  maxWebcamProducers: number;
+  maxScreenProducers: number;
   channels: Channel[];
   members: SessionInfo[];
   roles: RoleInfo[];
@@ -196,19 +213,21 @@ export interface ServerTransportCreatedMessage {
 export interface ServerProducedMessage {
   type: "produced";
   producerId: string;
+  mediaType?: "mic" | "webcam" | "screen";
 }
 
 export interface ServerNewProducerMessage {
   type: "new-producer";
   userId: string;
   producerId: string;
+  mediaType?: "mic" | "webcam" | "screen";
 }
 
 export interface ServerConsumeResultMessage {
   type: "consume-result";
   consumerId: string;
   producerId: string;
-  kind: "audio";
+  kind: "audio" | "video";
   rtpParameters: object;
 }
 
@@ -216,6 +235,7 @@ export interface ServerProducerClosedMessage {
   type: "producer-closed";
   producerId: string;
   userId: string;
+  mediaType?: "mic" | "webcam" | "screen";
 }
 
 export interface ServerChatMessage {
@@ -312,6 +332,8 @@ export interface ServerUpdatedMessage {
   serverName?: string;
   serverDescription?: string;
   serverIconUrl?: string | null;
+  maxWebcamProducers?: number;
+  maxScreenProducers?: number;
 }
 
 export interface ServerPermissionsUpdatedMessage {

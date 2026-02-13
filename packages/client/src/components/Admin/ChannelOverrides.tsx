@@ -7,8 +7,8 @@ import type { PermissionSet, PermissionKey, ChannelPermissionOverride } from "@r
 import { PERMISSION_KEYS } from "@raddir/shared";
 
 const PERMISSION_LABELS: Record<PermissionKey, string> = {
-  join: "Join", speak: "Speak", whisper: "Whisper",
-  moveUsers: "Move Users", kick: "Kick", ban: "Ban",
+  join: "Join", speak: "Speak", video: "Video", screenShare: "Screen Share",
+  whisper: "Whisper", moveUsers: "Move Users", kick: "Kick", ban: "Ban",
   admin: "Admin", manageChannels: "Manage Channels",
   managePermissions: "Manage Perms", manageRoles: "Manage Roles",
 };

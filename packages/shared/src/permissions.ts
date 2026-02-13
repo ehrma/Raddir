@@ -1,6 +1,8 @@
 export const PERMISSION_KEYS = [
   "join",
   "speak",
+  "video",
+  "screenShare",
   "whisper",
   "moveUsers",
   "kick",
@@ -16,6 +18,8 @@ export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 export const DEFAULT_ADMIN_PERMISSIONS: Record<PermissionKey, "allow" | "deny" | "inherit"> = {
   join: "allow",
   speak: "allow",
+  video: "allow",
+  screenShare: "allow",
   whisper: "allow",
   moveUsers: "allow",
   kick: "allow",
@@ -29,6 +33,8 @@ export const DEFAULT_ADMIN_PERMISSIONS: Record<PermissionKey, "allow" | "deny" |
 export const DEFAULT_MEMBER_PERMISSIONS: Record<PermissionKey, "allow" | "deny" | "inherit"> = {
   join: "allow",
   speak: "allow",
+  video: "allow",
+  screenShare: "allow",
   whisper: "allow",
   moveUsers: "deny",
   kick: "deny",
@@ -42,6 +48,8 @@ export const DEFAULT_MEMBER_PERMISSIONS: Record<PermissionKey, "allow" | "deny" 
 export const DEFAULT_GUEST_PERMISSIONS: Record<PermissionKey, "allow" | "deny" | "inherit"> = {
   join: "allow",
   speak: "deny",
+  video: "deny",
+  screenShare: "deny",
   whisper: "deny",
   moveUsers: "deny",
   kick: "deny",

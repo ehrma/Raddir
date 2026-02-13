@@ -5,7 +5,7 @@ import { getSignalingClient } from "../hooks/useConnection";
 import { usePermissions } from "../hooks/usePermissions";
 import { getApiBase, getAuthHeaders } from "../lib/api-base";
 import { cn } from "../lib/cn";
-import { Plus, Ban, Shield, X, Hash, Upload, Image } from "lucide-react";
+import { Plus, Ban, Shield, X, Hash, Upload, Image, Camera, Monitor } from "lucide-react";
 import { RoleEditor } from "./Admin/RoleEditor";
 import { ChannelOverrides } from "./Admin/ChannelOverrides";
 import { EffectivePerms } from "./Admin/EffectivePerms";
@@ -334,9 +334,11 @@ function InviteAdmin() {
 }
 
 function ServerSettings() {
-  const { serverId, serverName, serverDescription, serverIconUrl } = useServerStore();
+  const { serverId, serverName, serverDescription, serverIconUrl, maxWebcamProducers, maxScreenProducers } = useServerStore();
   const [name, setName] = useState(serverName ?? "");
   const [description, setDescription] = useState(serverDescription ?? "");
+  const [maxWebcams, setMaxWebcams] = useState(maxWebcamProducers);
+  const [maxScreens, setMaxScreens] = useState(maxScreenProducers);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
@@ -348,7 +350,9 @@ function ServerSettings() {
   useEffect(() => {
     setName(serverName ?? "");
     setDescription(serverDescription ?? "");
-  }, [serverName, serverDescription]);
+    setMaxWebcams(maxWebcamProducers);
+    setMaxScreens(maxScreenProducers);
+  }, [serverName, serverDescription, maxWebcamProducers, maxScreenProducers]);
 
   const handleSave = async () => {
     if (!serverId || !name.trim()) return;
@@ -358,7 +362,7 @@ function ServerSettings() {
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}`, {
         method: "PATCH",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ name: name.trim(), description }),
+        body: JSON.stringify({ name: name.trim(), description, maxWebcamProducers: maxWebcams, maxScreenProducers: maxScreens }),
       });
       if (res.ok) {
         setSaved(true);
@@ -510,6 +514,42 @@ function ServerSettings() {
           rows={3}
           className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:border-accent resize-none"
         />
+      </div>
+
+      {/* Video Limits */}
+      <div className="border-t border-surface-800 pt-4">
+        <label className="text-xs font-medium text-surface-300 mb-3 block">Video Stream Limits (per channel)</label>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="flex items-center gap-1.5 text-[11px] text-surface-400 mb-1.5">
+              <Camera className="w-3 h-3" /> Max Webcams
+            </label>
+            <select
+              value={maxWebcams}
+              onChange={(e) => setMaxWebcams(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 focus:outline-none focus:border-accent"
+            >
+              {[0, 1, 2, 3, 5, 10, 15, 20, 50].map((n) => (
+                <option key={n} value={n}>{n === 0 ? "Disabled" : n}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="flex items-center gap-1.5 text-[11px] text-surface-400 mb-1.5">
+              <Monitor className="w-3 h-3" /> Max Screen Shares
+            </label>
+            <select
+              value={maxScreens}
+              onChange={(e) => setMaxScreens(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 focus:outline-none focus:border-accent"
+            >
+              {[0, 1, 2, 3, 5, 10].map((n) => (
+                <option key={n} value={n}>{n === 0 ? "Disabled" : n}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="text-[9px] text-surface-500 mt-1.5">Limits the number of simultaneous webcam and screen share streams per voice channel.</p>
       </div>
 
       {/* Save Button */}

@@ -6,6 +6,8 @@ import { getChannel } from "../models/channel.js";
 const EMPTY_PERMISSIONS: PermissionSet = {
   join: "inherit",
   speak: "inherit",
+  video: "inherit",
+  screenShare: "inherit",
   whisper: "inherit",
   moveUsers: "inherit",
   kick: "inherit",

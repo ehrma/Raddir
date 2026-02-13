@@ -1,4 +1,4 @@
-import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, session, safeStorage, nativeTheme } from "electron";
+import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, session, safeStorage, nativeTheme, desktopCapturer } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, existsSync, unlinkSync, readFileSync, mkdirSync } from "node:fs";
@@ -121,6 +121,18 @@ ipcMain.handle("safe-storage-decrypt", (_event, encrypted) => {
 });
 ipcMain.handle("get-theme", () => {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+});
+ipcMain.handle("get-desktop-sources", async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen", "window"],
+    thumbnailSize: { width: 320, height: 180 }
+  });
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    thumbnailDataUrl: s.thumbnail.toDataURL(),
+    display_id: s.display_id
+  }));
 });
 let cachedIdentity = null;
 function getIdentityFilePath() {

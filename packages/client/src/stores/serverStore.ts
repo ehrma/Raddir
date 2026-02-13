@@ -10,6 +10,8 @@ export interface ServerState {
   serverName: string | null;
   serverDescription: string | null;
   serverIconUrl: string | null;
+  maxWebcamProducers: number;
+  maxScreenProducers: number;
   channels: Channel[];
   members: Map<string, SessionInfo>;
   roles: RoleInfo[];
@@ -23,6 +25,8 @@ export interface ServerState {
     serverName: string;
     serverDescription: string;
     serverIconUrl: string | null;
+    maxWebcamProducers?: number;
+    maxScreenProducers?: number;
     channels: Channel[];
     members: SessionInfo[];
     roles: RoleInfo[];
@@ -43,6 +47,8 @@ const initialState = {
   serverName: null as string | null,
   serverDescription: null as string | null,
   serverIconUrl: null as string | null,
+  maxWebcamProducers: 5,
+  maxScreenProducers: 1,
   channels: [] as Channel[],
   members: new Map<string, SessionInfo>(),
   roles: [] as RoleInfo[],
@@ -64,6 +70,8 @@ export const useServerStore = create<ServerState>((set) => ({
       serverName: data.serverName,
       serverDescription: data.serverDescription,
       serverIconUrl: data.serverIconUrl,
+      maxWebcamProducers: data.maxWebcamProducers ?? 5,
+      maxScreenProducers: data.maxScreenProducers ?? 1,
       channels: data.channels,
       members: new Map(data.members.map((m) => [m.userId, m])),
       roles: data.roles,

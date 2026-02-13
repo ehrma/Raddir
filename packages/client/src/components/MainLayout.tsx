@@ -2,18 +2,29 @@ import { ChannelTree } from "./ChannelTree";
 import { UserList } from "./UserList";
 import { VoiceControls } from "./VoiceControls";
 import { TextChat } from "./TextChat";
+import { VideoGrid } from "./VideoGrid";
+import { ScreenSourcePicker } from "./ScreenSourcePicker";
 import { useServerStore } from "../stores/serverStore";
+import { useVideoStore } from "../stores/videoStore";
 import { useAudio } from "../hooks/useAudio";
+import { useVideo } from "../hooks/useVideo";
+import { usePermissions } from "../hooks/usePermissions";
 import { getApiBase } from "../lib/api-base";
+import { Camera, CameraOff, Monitor, MonitorOff } from "lucide-react";
+import { cn } from "../lib/cn";
 
 export function MainLayout() {
   const { currentChannelId, channels, serverName, serverDescription, serverIconUrl } = useServerStore();
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   useAudio();
+  const { webcamActive, screenShareActive, showSourcePicker, toggleWebcam, toggleScreenShare, startScreenShareWithSource } = useVideo();
+  const closeSourcePicker = () => useVideoStore.getState().setShowSourcePicker(false);
+  const { can } = usePermissions();
 
   const iconSrc = serverIconUrl ? `${getApiBase()}${serverIconUrl}` : null;
 
   return (
+    <>
     <div className="flex h-screen bg-surface-950 text-surface-100">
       {/* Sidebar: Channel tree + voice controls */}
       <div className="w-64 flex flex-col bg-surface-900 border-r border-surface-800">
@@ -59,10 +70,45 @@ export function MainLayout() {
                   {currentChannel.description}
                 </span>
               )}
+              <div className="ml-auto flex items-center gap-1">
+                <span title={!can("video") ? "You do not have sufficient rights to use video" : webcamActive ? "Stop Camera" : "Start Camera"}>
+                  <button
+                    onClick={can("video") ? toggleWebcam : undefined}
+                    disabled={!can("video")}
+                    className={cn(
+                      "p-1.5 rounded-md transition-colors",
+                      !can("video")
+                        ? "text-surface-600 cursor-not-allowed opacity-50 pointer-events-none"
+                        : webcamActive
+                          ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                          : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
+                    )}
+                  >
+                    {webcamActive ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
+                  </button>
+                </span>
+                <span title={!can("screenShare") ? "You do not have sufficient rights to share your screen" : screenShareActive ? "Stop Screen Share" : "Share Screen"}>
+                  <button
+                    onClick={can("screenShare") ? toggleScreenShare : undefined}
+                    disabled={!can("screenShare")}
+                    className={cn(
+                      "p-1.5 rounded-md transition-colors",
+                      !can("screenShare")
+                        ? "text-surface-600 cursor-not-allowed opacity-50 pointer-events-none"
+                        : screenShareActive
+                          ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                          : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
+                    )}
+                  >
+                    {screenShareActive ? <Monitor className="w-4 h-4" /> : <MonitorOff className="w-4 h-4" />}
+                  </button>
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-1 overflow-hidden">
               <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                <VideoGrid />
                 <TextChat />
               </div>
               <div className="w-56 border-l border-surface-800 bg-surface-900/30">
@@ -79,5 +125,12 @@ export function MainLayout() {
         )}
       </div>
     </div>
+    {showSourcePicker && (
+      <ScreenSourcePicker
+        onSelect={startScreenShareWithSource}
+        onClose={closeSourcePicker}
+      />
+    )}
+    </>
   );
 }
