@@ -23,6 +23,8 @@ interface RoleData {
 const PERMISSION_LABELS: Record<PermissionKey, string> = {
   join: "Join Channels",
   speak: "Speak",
+  video: "Video",
+  screenShare: "Screen Share",
   whisper: "Whisper",
   moveUsers: "Move Users",
   kick: "Kick",
@@ -102,8 +104,8 @@ export function RoleEditor() {
     if (!newRoleName.trim() || !serverId) return;
     try {
       const defaultPerms: PermissionSet = {
-        join: "allow", speak: "allow", whisper: "deny",
-        moveUsers: "deny", kick: "deny", ban: "deny",
+        join: "allow", speak: "allow", video: "allow", screenShare: "allow",
+        whisper: "deny", moveUsers: "deny", kick: "deny", ban: "deny",
         admin: "deny", manageChannels: "deny",
         managePermissions: "deny", manageRoles: "deny",
       };

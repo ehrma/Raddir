@@ -16,8 +16,16 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Mute & deafen** — Mute stops transmission; deafen mutes all incoming audio
 - **Speaking indicators** — Green ring on avatars for yourself and other users
 
+### Video & Screen Share
+- **Webcam support** — 720p/30fps video via mediasoup SFU, permission-gated per role
+- **Screen sharing** — Share entire screen or individual window via native OS picker
+- **E2EE video** — Same AES-256-GCM Insertable Streams pipeline as voice; server cannot decode video frames
+- **Video grid** — Responsive tile layout above chat; screen shares get priority sizing
+- **Video indicators** — Camera and monitor icons in user list show who is sharing
+
 ### Security & Privacy
 - **End-to-end encrypted voice** — AES-256-GCM via Insertable Streams; server is cryptographically blind
+- **End-to-end encrypted video** — Same Insertable Streams E2EE as voice; webcam and screen share frames are AES-256-GCM encrypted
 - **End-to-end encrypted text chat** — Messages encrypted client-side before transmission
 - **Persistent identity keys** — Ed25519 (with ECDSA P-256 browser fallback), device-bound keypair
 - **User verification** — Signal-style safety numbers and fingerprints; verified users show a badge
@@ -249,6 +257,8 @@ Mic → Opus encode → [E2EE: AES-256-GCM encrypt] → DTLS-SRTP → mediasoup 
 | What | Transport Encrypted? | E2E Encrypted? | Server can read? |
 |---|---|---|---|
 | Voice audio | ✅ DTLS-SRTP | ✅ AES-256-GCM | ❌ **No** |
+| Webcam video | ✅ DTLS-SRTP | ✅ AES-256-GCM | ❌ **No** |
+| Screen share video | ✅ DTLS-SRTP | ✅ AES-256-GCM | ❌ **No** |
 | Text chat | ✅ WSS (TLS) | ✅ AES-256-GCM | ❌ **No** |
 | Signaling / metadata | ✅ WSS (TLS) | — | ✅ Yes (routing) |
 | Identity keys | ✅ WSS (TLS) | — | ✅ Public keys only |

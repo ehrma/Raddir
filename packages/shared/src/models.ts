@@ -50,6 +50,8 @@ export interface Role {
 export interface PermissionSet {
   join: PermissionValue;
   speak: PermissionValue;
+  video: PermissionValue;
+  screenShare: PermissionValue;
   whisper: PermissionValue;
   moveUsers: PermissionValue;
   kick: PermissionValue;

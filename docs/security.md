@@ -15,15 +15,17 @@ Raddir uses **two layers** of encryption for voice and text:
 ### Layer 2: End-to-End Encryption (always on)
 
 - **Voice**: AES-256-GCM applied to each Opus frame via Insertable Streams API
+- **Video & screen share**: same AES-256-GCM Insertable Streams pipeline as voice; VP8/VP9 frames encrypted before reaching the SFU
 - **Text chat**: AES-256-GCM applied to message content before sending
 - Protects against the **server itself** — it cannot decrypt content
 
 ## What the Server CANNOT Do
 
 - **Listen to voice audio** — Opus frames are encrypted before reaching the SFU
+- **View video or screen shares** — VP8/VP9 frames are encrypted before reaching the SFU
 - **Read text messages** — server stores only ciphertext
-- **Perform content analysis** — no speech recognition, no keyword detection
-- **Record decryptable audio** — even if packets are captured, they are AES-256-GCM encrypted
+- **Perform content analysis** — no speech recognition, no keyword detection, no image analysis
+- **Record decryptable audio or video** — even if packets are captured, they are AES-256-GCM encrypted
 - **Recover encryption keys** — keys are exchanged directly between clients; the server only relays opaque blobs
 
 ## What the Server CAN See
@@ -52,7 +54,7 @@ The following data is **not** end-to-end encrypted by design:
 
 These are analogous to a Discord server icon or a TeamSpeak server name — they are metadata that the server must know to function. Encrypting them would provide no security benefit since they are shown to all members anyway.
 
-**E2EE protects _content_ (voice audio and text messages). Metadata and cosmetic data are not content.**
+**E2EE protects _content_ (voice audio, video, screen share, and text messages). Metadata and cosmetic data are not content.**
 
 ## How E2EE Works
 

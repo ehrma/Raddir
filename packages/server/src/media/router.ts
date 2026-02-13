@@ -15,6 +15,21 @@ const mediaCodecs: RtpCodecCapability[] = [
       useinbandfec: 1,
     },
   },
+  {
+    kind: "video",
+    mimeType: "video/VP8",
+    preferredPayloadType: 96,
+    clockRate: 90000,
+  },
+  {
+    kind: "video",
+    mimeType: "video/VP9",
+    preferredPayloadType: 98,
+    clockRate: 90000,
+    parameters: {
+      "profile-id": 2,
+    },
+  },
 ];
 
 export async function getOrCreateRouter(channelId: string): Promise<Router> {

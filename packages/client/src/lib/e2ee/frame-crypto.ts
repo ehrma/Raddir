@@ -2,7 +2,11 @@
 // Electron 34 does not support RTCRtpScriptTransform, so we use the older
 // sender.transform / receiver.transform with a TransformStream directly.
 
-const UNENCRYPTED_BYTES = 1; // Preserve first byte (Opus TOC)
+// Audio (Opus): preserve 1 byte (TOC byte) so the frame is still valid RTP.
+// Video (VP8/VP9): preserve 10 bytes (payload descriptor + keyframe indicator)
+// so the SFU can detect keyframes and route them correctly.
+const UNENCRYPTED_BYTES_AUDIO = 1;
+const UNENCRYPTED_BYTES_VIDEO = 10;
 const IV_LENGTH = 12;
 const TAG_LENGTH = 128;
 
@@ -18,18 +22,21 @@ export async function setFrameEncryptionKey(key: CryptoKey | null): Promise<void
 
 /**
  * Apply an encrypt TransformStream to a sender (encrypt outgoing frames).
+ * @param mediaKind - "audio" or "video" — determines how many unencrypted header bytes to preserve
  */
-export function applyEncryptTransform(sender: RTCRtpSender): void {
+export function applyEncryptTransform(sender: RTCRtpSender, mediaKind: "audio" | "video" = "audio"): void {
+  const unencryptedBytes = mediaKind === "video" ? UNENCRYPTED_BYTES_VIDEO : UNENCRYPTED_BYTES_AUDIO;
   const transform = new TransformStream({
     async transform(encodedFrame: any, controller: any) {
       if (!currentKey) {
-        // No key — drop frame to prevent sending unencrypted audio
+        // No key — drop frame to prevent sending unencrypted data
         return;
       }
       try {
         const data: ArrayBuffer = encodedFrame.data;
-        const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
-        const payload = data.slice(UNENCRYPTED_BYTES);
+        const headerLen = Math.min(unencryptedBytes, data.byteLength);
+        const header = new Uint8Array(data, 0, headerLen);
+        const payload = data.slice(headerLen);
 
         const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
         const encrypted = await crypto.subtle.encrypt(
@@ -38,11 +45,11 @@ export function applyEncryptTransform(sender: RTCRtpSender): void {
           payload
         );
 
-        const newData = new ArrayBuffer(UNENCRYPTED_BYTES + iv.byteLength + encrypted.byteLength);
+        const newData = new ArrayBuffer(headerLen + iv.byteLength + encrypted.byteLength);
         const newView = new Uint8Array(newData);
         newView.set(header, 0);
-        newView.set(iv, UNENCRYPTED_BYTES);
-        newView.set(new Uint8Array(encrypted), UNENCRYPTED_BYTES + iv.byteLength);
+        newView.set(iv, headerLen);
+        newView.set(new Uint8Array(encrypted), headerLen + iv.byteLength);
 
         encodedFrame.data = newData;
         controller.enqueue(encodedFrame);
@@ -56,24 +63,27 @@ export function applyEncryptTransform(sender: RTCRtpSender): void {
 
 /**
  * Apply a decrypt TransformStream to a receiver (decrypt incoming frames).
+ * @param mediaKind - "audio" or "video" — must match the sender's mediaKind
  */
-export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
+export function applyDecryptTransform(receiver: RTCRtpReceiver, mediaKind: "audio" | "video" = "audio"): void {
+  const unencryptedBytes = mediaKind === "video" ? UNENCRYPTED_BYTES_VIDEO : UNENCRYPTED_BYTES_AUDIO;
   const transform = new TransformStream({
     async transform(encodedFrame: any, controller: any) {
       if (!currentKey) {
-        // No key — drop frame to prevent playing garbage / unencrypted audio
+        // No key — drop frame to prevent playing garbage / unencrypted data
         return;
       }
       try {
         const data: ArrayBuffer = encodedFrame.data;
-        if (data.byteLength <= UNENCRYPTED_BYTES + IV_LENGTH) {
+        if (data.byteLength <= unencryptedBytes + IV_LENGTH) {
           // Too short to be encrypted — drop
           return;
         }
 
-        const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
-        const iv = new Uint8Array(data, UNENCRYPTED_BYTES, IV_LENGTH);
-        const encrypted = data.slice(UNENCRYPTED_BYTES + IV_LENGTH);
+        const headerLen = Math.min(unencryptedBytes, data.byteLength);
+        const header = new Uint8Array(data, 0, headerLen);
+        const iv = new Uint8Array(data, headerLen, IV_LENGTH);
+        const encrypted = data.slice(headerLen + IV_LENGTH);
 
         const decrypted = await crypto.subtle.decrypt(
           { name: "AES-GCM", iv, tagLength: TAG_LENGTH },
@@ -81,15 +91,15 @@ export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
           encrypted
         );
 
-        const newData = new ArrayBuffer(UNENCRYPTED_BYTES + decrypted.byteLength);
+        const newData = new ArrayBuffer(headerLen + decrypted.byteLength);
         const newView = new Uint8Array(newData);
         newView.set(header, 0);
-        newView.set(new Uint8Array(decrypted), UNENCRYPTED_BYTES);
+        newView.set(new Uint8Array(decrypted), headerLen);
 
         encodedFrame.data = newData;
         controller.enqueue(encodedFrame);
       } catch {
-        // Decrypt failed — drop frame to prevent garbage audio
+        // Decrypt failed — drop frame to prevent garbage output
       }
     },
   });

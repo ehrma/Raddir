@@ -107,6 +107,7 @@ function getMsgCategory(type: string): string {
     case "create-transport":
     case "connect-transport":
     case "produce":
+    case "stop-producer":
     case "consume":
     case "resume-consumer": return "media";
     default: return "general";
@@ -416,6 +417,10 @@ async function handleMessage(client: ConnectedClient, msg: ClientMessage): Promi
       await handleProduce(client, msg);
       break;
 
+    case "stop-producer":
+      handleStopProducer(client, msg.producerId);
+      break;
+
     case "consume":
       await handleConsume(client, msg.producerId);
       break;
@@ -533,6 +538,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
             type: "new-producer",
             userId: other.userId,
             producerId: producer.id,
+            mediaType: (producer.appData as any)?.mediaType,
           });
         }
       }
@@ -615,25 +621,64 @@ async function handleProduce(
 ): Promise<void> {
   if (!client.channelId || !client.serverId) return;
 
-  if (!clientHasPermission(client, "speak", client.channelId)) {
-    send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to speak" });
-    return;
+  const mediaType = msg.mediaType ?? "mic";
+
+  // Permission check based on media type
+  if (mediaType === "mic") {
+    if (!clientHasPermission(client, "speak", client.channelId)) {
+      send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to speak" });
+      return;
+    }
+  } else if (mediaType === "webcam") {
+    if (!clientHasPermission(client, "video", client.channelId)) {
+      send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to share video" });
+      return;
+    }
+  } else if (mediaType === "screen") {
+    if (!clientHasPermission(client, "screenShare", client.channelId)) {
+      send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to share screen" });
+      return;
+    }
   }
 
   const producer = await createProducer(
     client.userId,
     msg.transportId,
     msg.kind,
-    msg.rtpParameters as any
+    msg.rtpParameters as any,
+    { mediaType }
   );
 
-  send(client.ws, { type: "produced", producerId: producer.id });
+  send(client.ws, { type: "produced", producerId: producer.id, mediaType });
 
   // Notify others in channel about new producer
   broadcast(getChannelClients(client.channelId), {
     type: "new-producer",
     userId: client.userId,
     producerId: producer.id,
+    mediaType,
+  }, client.userId);
+}
+
+function handleStopProducer(client: ConnectedClient, producerId: string): void {
+  if (!client.channelId) return;
+
+  const peer = getPeerTransports(client.userId);
+  if (!peer) return;
+
+  const producer = peer.producers.get(producerId);
+  if (!producer) return;
+
+  const mediaType = (producer.appData as any)?.mediaType;
+  producer.close();
+  peer.producers.delete(producerId);
+
+  // Notify others in channel
+  broadcast(getChannelClients(client.channelId), {
+    type: "producer-closed",
+    producerId,
+    userId: client.userId,
+    mediaType,
   }, client.userId);
 }
 
@@ -655,7 +700,7 @@ async function handleConsume(client: ConnectedClient, producerId: string): Promi
     type: "consume-result",
     consumerId: consumer.id,
     producerId,
-    kind: "audio",
+    kind: consumer.kind,
     rtpParameters: consumer.rtpParameters,
   });
 }
