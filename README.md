@@ -2,7 +2,7 @@
 
 **A modern, self-hostable, privacy-first voice platform for groups that take communication seriously.**
 
-Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end encryption. The server **cannot** read your voice or text content — only metadata (who, when, where) is visible. All dependencies are open source (MIT/ISC/Apache 2.0).
+Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end encryption. The server **cannot** read your voice or text content — only metadata (who, when, where) is visible. Licensed under [AGPL-3.0](LICENSE); all third-party dependencies are permissively licensed (MIT/ISC/Apache 2.0).
 
 ## Features
 
