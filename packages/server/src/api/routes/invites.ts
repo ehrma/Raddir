@@ -4,23 +4,24 @@ import { getDb } from "../../db/database.js";
 import { requireAdmin } from "../auth.js";
 
 /**
- * Encode an invite blob: base64-encoded JSON with server address and token.
- * This is what gets copied and shared with invitees.
+ * Encode an invite blob: base64url-encoded JSON containing only the token.
+ * Server address is stored server-side and returned on redeem — never trust the blob for routing.
  */
-function encodeInviteBlob(serverAddress: string, token: string): string {
-  const blob = JSON.stringify({ v: 1, a: serverAddress, t: token });
+function encodeInviteBlob(token: string): string {
+  const blob = JSON.stringify({ v: 2, t: token });
   return Buffer.from(blob, "utf-8").toString("base64url");
 }
 
 /**
- * Decode an invite blob back to { address, token }.
+ * Decode an invite blob back to { token }.
+ * Supports v1 (legacy: had address) and v2 (current: token only).
  */
-function decodeInviteBlob(encoded: string): { address: string; token: string } | null {
+function decodeInviteBlob(encoded: string): { token: string } | null {
   try {
     const json = Buffer.from(encoded, "base64url").toString("utf-8");
     const parsed = JSON.parse(json);
-    if (parsed.v !== 1 || !parsed.a || !parsed.t) return null;
-    return { address: parsed.a, token: parsed.t };
+    if (!parsed.t) return null;
+    return { token: parsed.t };
   } catch {
     return null;
   }
@@ -51,11 +52,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
 
       const db = getDb();
       db.prepare(`
-        INSERT INTO invite_tokens (id, server_id, token, created_by, max_uses, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, serverId, token, createdBy, maxUses ?? null, expiresAt);
+        INSERT INTO invite_tokens (id, server_id, token, created_by, max_uses, expires_at, server_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(id, serverId, token, createdBy, maxUses ?? null, expiresAt, serverAddress);
 
-      const inviteBlob = encodeInviteBlob(serverAddress, token);
+      const inviteBlob = encodeInviteBlob(token);
 
       reply.status(201);
       return { id, token, serverId, maxUses: maxUses ?? null, expiresAt, inviteBlob };
@@ -131,27 +132,31 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "Invite expired" };
       }
 
-      if (row.max_uses && row.uses >= row.max_uses) {
-        reply.status(410);
-        return { error: "Invite has reached max uses" };
-      }
-
       // Check if this public key already has a credential for this server
       const existing = db.prepare(
         "SELECT credential FROM session_credentials WHERE user_public_key = ? AND server_id = ? AND revoked_at IS NULL"
       ).get(publicKey, row.server_id) as any;
 
       if (existing) {
-        // Already redeemed — return the existing credential
         return {
           credential: existing.credential,
-          serverAddress: decoded.address,
+          serverAddress: row.server_address || "",
           serverId: row.server_id,
         };
       }
 
-      // Increment invite uses
-      db.prepare("UPDATE invite_tokens SET uses = uses + 1 WHERE id = ?").run(row.id);
+      // Atomic increment: only succeeds if uses < max_uses (or no limit)
+      const result = db.prepare(`
+        UPDATE invite_tokens SET uses = uses + 1
+        WHERE id = ?
+          AND (max_uses IS NULL OR uses < max_uses)
+          AND (expires_at IS NULL OR expires_at >= ?)
+      `).run(row.id, now);
+
+      if (result.changes === 0) {
+        reply.status(410);
+        return { error: "Invite has reached max uses or expired" };
+      }
 
       // Create a permanent session credential
       const credentialId = nanoid();
@@ -164,7 +169,7 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
 
       return {
         credential,
-        serverAddress: decoded.address,
+        serverAddress: row.server_address || "",
         serverId: row.server_id,
       };
     }
@@ -186,7 +191,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "Invalid invite blob" };
       }
 
-      return { address: decoded.address, token: decoded.token };
+      // Look up server address from DB — never trust the blob for routing
+      const db = getDb();
+      const row = db.prepare("SELECT server_address FROM invite_tokens WHERE token = ?").get(decoded.token) as any;
+
+      return { address: row?.server_address || "", token: decoded.token };
     }
   );
 }

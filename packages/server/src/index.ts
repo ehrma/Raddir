@@ -43,6 +43,11 @@ async function main(): Promise<void> {
   ensureDefaultRoles(server.id);
   console.log(`[raddir] Default server: ${server.name} (${server.id})`);
 
+  // Validate announcedIp for NAT scenarios
+  if (config.host === "0.0.0.0" && !config.announcedIp) {
+    console.warn("[raddir] WARNING: Listening on 0.0.0.0 without RADDIR_ANNOUNCED_IP — WebRTC will fail for remote clients behind NAT. Set RADDIR_ANNOUNCED_IP to your public/LAN IP.");
+  }
+
   // Initialize mediasoup workers
   await createWorkerPool(config);
   initTransportConfig(config);
@@ -74,7 +79,17 @@ async function main(): Promise<void> {
   });
 
   // Enable CORS for API requests from the Electron/browser client
-  await fastify.register(cors, { origin: true });
+  // Electron uses file:// (null origin) or app:// — allow those plus localhost dev servers
+  await fastify.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin || origin === "null" || origin.startsWith("file://") || origin.startsWith("app://")
+        || origin.startsWith("http://localhost") || origin.startsWith("https://localhost")) {
+        cb(null, true);
+      } else {
+        cb(null, false);
+      }
+    },
+  });
 
   // Schedule automatic certificate renewal for Let's Encrypt
   scheduleRenewal(tlsOpts, (newTls) => {

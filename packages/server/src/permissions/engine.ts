@@ -104,6 +104,14 @@ function mergeRolePermissions(permSets: PermissionSet[]): PermissionSet {
   return result;
 }
 
+/**
+ * Terminal resolution: any permission still set to "inherit" after merging
+ * server roles and channel overrides becomes "deny".
+ *
+ * This is intentional — "inherit" means "no opinion from any role/override",
+ * and the safe default is to deny access. To grant a permission, at least one
+ * role or channel override must explicitly set it to "allow".
+ */
 function resolveInherits(perms: PermissionSet): PermissionSet {
   const result = { ...perms };
   for (const key of PERMISSION_KEYS) {

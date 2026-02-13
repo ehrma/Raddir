@@ -1,6 +1,7 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { Server as HttpServer } from "node:http";
+import { RateLimiter } from "../lib/rate-limiter.js";
 import type {
   ClientMessage,
   ServerMessage,
@@ -36,6 +37,7 @@ interface ConnectedClient {
   channelId: string | null;
   isMuted: boolean;
   isDeafened: boolean;
+  isAdmin: boolean;
   publicKey?: string;
   rtpCapabilities?: RtpCapabilities;
 }
@@ -64,14 +66,32 @@ function broadcast(targets: ConnectedClient[], msg: ServerMessage, excludeUserId
   }
 }
 
+/** Check permission: ephemeral admin bypasses all checks, otherwise use DB roles. */
+function clientHasPermission(client: ConnectedClient, permission: import("@raddir/shared").PermissionKey, channelId?: string): boolean {
+  if (client.isAdmin) return true;
+  if (!client.serverId) return false;
+  return hasPermission(client.userId, client.serverId, permission, channelId);
+}
+
 let serverConfig: RaddirConfig;
+
+// Rate limit: 10 auth attempts per IP per 60 seconds
+const authLimiter = new RateLimiter(10, 60_000);
+authLimiter.startCleanup();
 
 export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): void {
   serverConfig = config;
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws",
+    maxPayload: 64 * 1024, // 64 KB max message size
+  });
 
-  wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let client: ConnectedClient | null = null;
+    const remoteIp = req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()
+      || req.socket.remoteAddress
+      || "unknown";
 
     ws.on("message", async (raw) => {
       let msg: ClientMessage;
@@ -84,6 +104,11 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
 
       try {
         if (msg.type === "auth") {
+          if (!authLimiter.check(remoteIp)) {
+            send(ws, { type: "auth-result", success: false, error: "Too many auth attempts. Try again later." });
+            ws.close();
+            return;
+          }
           client = await handleAuth(ws, msg);
         } else if (!client) {
           send(ws, { type: "error", code: "NOT_AUTHENTICATED", message: "Authenticate first" });
@@ -164,6 +189,8 @@ async function handleAuth(
     try { existing.ws.close(); } catch {}
   }
 
+  const isAdmin = !!(serverConfig.adminToken && msg.adminToken === serverConfig.adminToken);
+
   const client: ConnectedClient = {
     ws,
     userId: user.id,
@@ -172,6 +199,7 @@ async function handleAuth(
     channelId: null,
     isMuted: false,
     isDeafened: false,
+    isAdmin,
     publicKey: msg.publicKey,
   };
 
@@ -193,13 +221,8 @@ async function handleAuth(
     assignRole(user.id, server.id, defaultRole.id);
   }
 
-  // Grant admin role if valid admin token provided
-  if (serverConfig.adminToken && msg.adminToken === serverConfig.adminToken) {
-    const adminRole = roles.find((r) => r.name === "Admin");
-    if (adminRole) {
-      assignRole(user.id, server.id, adminRole.id);
-      console.log(`[signaling] Admin role granted to ${msg.nickname} (${user.id})`);
-    }
+  if (isAdmin) {
+    console.log(`[signaling] Ephemeral admin privileges granted to ${msg.nickname} (${user.id})`);
   }
 
   client.serverId = server.id;
@@ -305,7 +328,7 @@ async function handleMessage(client: ConnectedClient, msg: ClientMessage): Promi
       break;
 
     case "move-user":
-      handleMoveUser(client, msg);
+      await handleMoveUser(client, msg);
       break;
 
     case "ban":
@@ -347,7 +370,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
     return;
   }
 
-  if (!hasPermission(client.userId, client.serverId, "join", channelId)) {
+  if (!clientHasPermission(client, "join", channelId)) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to join this channel" });
     return;
   }
@@ -392,12 +415,16 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
   for (const other of channelUsers) {
     if (other.userId === client.userId) continue;
     const peer = getPeerTransports(other.userId);
-    if (peer?.producer && !peer.producer.closed) {
-      send(client.ws, {
-        type: "new-producer",
-        userId: other.userId,
-        producerId: peer.producer.id,
-      });
+    if (peer) {
+      for (const producer of peer.producers.values()) {
+        if (!producer.closed) {
+          send(client.ws, {
+            type: "new-producer",
+            userId: other.userId,
+            producerId: producer.id,
+          });
+        }
+      }
     }
   }
 
@@ -473,7 +500,7 @@ async function handleProduce(
 ): Promise<void> {
   if (!client.channelId || !client.serverId) return;
 
-  if (!hasPermission(client.userId, client.serverId, "speak", client.channelId)) {
+  if (!clientHasPermission(client, "speak", client.channelId)) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to speak" });
     return;
   }
@@ -533,11 +560,11 @@ function handleChat(
 ): void {
   if (!client.channelId || !client.serverId) return;
 
-  // Server stores ciphertext only — it cannot read the content
-  const channelClients = getChannelClients(msg.channelId);
+  // Always use the server-tracked channel — never trust msg.channelId
+  const channelClients = getChannelClients(client.channelId);
   broadcast(channelClients, {
     type: "chat",
-    channelId: msg.channelId,
+    channelId: client.channelId,
     userId: client.userId,
     nickname: client.nickname,
     ciphertext: msg.ciphertext,
@@ -596,7 +623,7 @@ function handleKick(
 ): void {
   if (!client.serverId) return;
 
-  if (!hasPermission(client.userId, client.serverId, "kick")) {
+  if (!clientHasPermission(client, "kick")) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to kick" });
     return;
   }
@@ -616,13 +643,13 @@ function handleKick(
   target.ws.close();
 }
 
-function handleMoveUser(
+async function handleMoveUser(
   client: ConnectedClient,
   msg: Extract<ClientMessage, { type: "move-user" }>
-): void {
+): Promise<void> {
   if (!client.serverId) return;
 
-  if (!hasPermission(client.userId, client.serverId, "moveUsers")) {
+  if (!clientHasPermission(client, "moveUsers")) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to move users" });
     return;
   }
@@ -630,8 +657,8 @@ function handleMoveUser(
   const target = clients.get(msg.userId);
   if (!target || target.serverId !== client.serverId) return;
 
-  // Force the target to join the new channel
-  handleJoinChannel(target, msg.channelId);
+  // Force the target to join the new channel — await so broadcast happens after join completes
+  await handleJoinChannel(target, msg.channelId);
 
   broadcast(getServerClients(client.serverId), {
     type: "user-moved",
@@ -646,7 +673,7 @@ function handleBan(
 ): void {
   if (!client.serverId) return;
 
-  if (!hasPermission(client.userId, client.serverId, "ban")) {
+  if (!clientHasPermission(client, "ban")) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to ban" });
     return;
   }
@@ -670,7 +697,7 @@ function handleBan(
 
 function handleAssignRole(client: ConnectedClient, targetUserId: string, roleId: string, assign: boolean): void {
   if (!client.serverId) return;
-  if (!hasPermission(client.userId, client.serverId, "manageRoles")) {
+  if (!clientHasPermission(client, "manageRoles")) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to manage roles" });
     return;
   }

@@ -21,6 +21,9 @@ data/
 .env.local
 .env.production
 
+# Review tracking
+e2ee-review-round3.md
+
 # Logs
 *.log
 

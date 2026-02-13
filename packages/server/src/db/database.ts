@@ -184,6 +184,13 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
     `,
   },
+  {
+    name: "004_invite_address_and_unique_pubkey",
+    sql: `
+      ALTER TABLE invite_tokens ADD COLUMN server_address TEXT NOT NULL DEFAULT '';
+      CREATE UNIQUE INDEX idx_users_public_key ON users(public_key) WHERE public_key IS NOT NULL;
+    `,
+  },
 ];
 
 export function closeDb(): void {

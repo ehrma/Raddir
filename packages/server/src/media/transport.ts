@@ -13,7 +13,7 @@ import type { RaddirConfig } from "../config.js";
 export interface PeerTransports {
   sendTransport?: WebRtcTransport;
   recvTransport?: WebRtcTransport;
-  producer?: Producer;
+  producers: Map<string, Producer>;
   consumers: Map<string, Consumer>;
 }
 
@@ -89,12 +89,13 @@ export async function createProducer(
 
   const producer = await transport.produce({ kind, rtpParameters });
 
+  const peer = getOrCreatePeer(peerId);
+  peer.producers.set(producer.id, producer);
+
   producer.on("transportclose", () => {
     console.log(`[transport] Producer transport closed for peer ${peerId}`);
+    peer.producers.delete(producer.id);
   });
-
-  const peer = getOrCreatePeer(peerId);
-  peer.producer = producer;
 
   return producer;
 }
@@ -135,14 +136,23 @@ export async function createConsumer(
 }
 
 export function getProducer(peerId: string): Producer | undefined {
-  return peerTransports.get(peerId)?.producer;
+  const peer = peerTransports.get(peerId);
+  if (!peer) return undefined;
+  // Return first producer (primary audio) for backward compatibility
+  return peer.producers.values().next().value;
+}
+
+export function getProducers(peerId: string): Map<string, Producer> {
+  return peerTransports.get(peerId)?.producers ?? new Map();
 }
 
 export function closePeerTransports(peerId: string): void {
   const peer = peerTransports.get(peerId);
   if (!peer) return;
 
-  peer.producer?.close();
+  for (const producer of peer.producers.values()) {
+    producer.close();
+  }
   for (const consumer of peer.consumers.values()) {
     consumer.close();
   }
@@ -158,7 +168,7 @@ export function getPeerTransports(peerId: string): PeerTransports | undefined {
 function getOrCreatePeer(peerId: string): PeerTransports {
   let peer = peerTransports.get(peerId);
   if (!peer) {
-    peer = { consumers: new Map() };
+    peer = { producers: new Map(), consumers: new Map() };
     peerTransports.set(peerId, peer);
   }
   return peer;
