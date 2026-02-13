@@ -77,6 +77,13 @@ export interface ClientResumeConsumerMessage {
   consumerId: string;
 }
 
+export interface ClientSetPreferredLayersMessage {
+  type: "set-preferred-layers";
+  consumerId: string;
+  spatialLayer: number;
+  temporalLayer?: number;
+}
+
 export interface ClientChatMessage {
   type: "chat";
   channelId: string;
@@ -146,7 +153,8 @@ export type ClientMessage =
   | ClientSpeakingMessage
   | ClientAssignRoleMessage
   | ClientUnassignRoleMessage
-  | ClientStopProducerMessage;
+  | ClientStopProducerMessage
+  | ClientSetPreferredLayersMessage;
 
 // ─── Server → Client Messages ───────────────────────────────────────────────
 
@@ -163,6 +171,8 @@ export interface ServerJoinedServerMessage {
   serverName: string;
   serverDescription: string;
   serverIconUrl: string | null;
+  maxWebcamProducers: number;
+  maxScreenProducers: number;
   channels: Channel[];
   members: SessionInfo[];
   roles: RoleInfo[];
@@ -322,6 +332,8 @@ export interface ServerUpdatedMessage {
   serverName?: string;
   serverDescription?: string;
   serverIconUrl?: string | null;
+  maxWebcamProducers?: number;
+  maxScreenProducers?: number;
 }
 
 export interface ServerPermissionsUpdatedMessage {

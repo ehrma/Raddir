@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useServerStore } from "../stores/serverStore";
+import { requestVideoLayer } from "../hooks/useVideo";
 import { Camera, Monitor, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -104,6 +105,7 @@ export function VideoGrid() {
     label: string;
     isScreen: boolean;
     isLocal: boolean;
+    consumerId: string | null;
   }> = [];
 
   // Local screen share first (largest)
@@ -114,6 +116,7 @@ export function VideoGrid() {
       label: nickname,
       isScreen: true,
       isLocal: true,
+      consumerId: null,
     });
   }
 
@@ -128,6 +131,7 @@ export function VideoGrid() {
       label: member?.nickname ?? uid.slice(0, 8),
       isScreen: true,
       isLocal: false,
+      consumerId: video.consumerId,
     });
   }
 
@@ -139,6 +143,7 @@ export function VideoGrid() {
       label: nickname,
       isScreen: false,
       isLocal: true,
+      consumerId: null,
     });
   }
 
@@ -153,6 +158,7 @@ export function VideoGrid() {
       label: member?.nickname ?? uid.slice(0, 8),
       isScreen: false,
       isLocal: false,
+      consumerId: video.consumerId,
     });
   }
 
@@ -186,7 +192,11 @@ export function VideoGrid() {
               isScreen={tile.isScreen}
               isLocal={tile.isLocal}
               isMaximized={false}
-              onToggleMaximize={() => setMaximizedKey(tile.key)}
+              onToggleMaximize={() => {
+                setMaximizedKey(tile.key);
+                // Request high quality layer for maximized remote tile
+                if (tile.consumerId) requestVideoLayer(tile.consumerId, 2);
+              }}
             />
           ))}
         </div>
@@ -195,7 +205,11 @@ export function VideoGrid() {
       {maximizedTile && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-6"
-          onClick={() => setMaximizedKey(null)}
+          onClick={() => {
+            setMaximizedKey(null);
+            // Revert to low layer when closing maximized view
+            if (maximizedTile.consumerId) requestVideoLayer(maximizedTile.consumerId, 0);
+          }}
         >
           <div
             className="relative w-full h-full"
@@ -222,7 +236,10 @@ export function VideoGrid() {
                 {maximizedTile.isLocal && <span className="text-surface-400 ml-1">(you)</span>}
               </span>
               <button
-                onClick={() => setMaximizedKey(null)}
+                onClick={() => {
+                  setMaximizedKey(null);
+                  if (maximizedTile.consumerId) requestVideoLayer(maximizedTile.consumerId, 0);
+                }}
                 className="ml-2 p-0.5 rounded text-surface-400 hover:text-surface-100 transition-colors"
                 title="Minimize"
               >

@@ -5,6 +5,8 @@ export interface Server {
   iconPath: string | null;
   createdAt: number;
   maxUsers: number;
+  maxWebcamProducers: number;
+  maxScreenProducers: number;
 }
 
 export interface Channel {

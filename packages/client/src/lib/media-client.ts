@@ -68,8 +68,17 @@ export class MediaClient {
 
       const unsub = this.signaling.on("produced", (msg) => {
         const produced = msg as ServerProducedMessage;
+        unsubErr();
         callback({ id: produced.producerId });
         unsub();
+      });
+
+      const unsubErr = this.signaling.on("error", (msg: any) => {
+        if (msg.code === "PRODUCER_LIMIT" || msg.code === "NO_PERMISSION") {
+          unsub();
+          unsubErr();
+          errback(new Error(msg.message ?? msg.code));
+        }
       });
     });
   }
@@ -146,16 +155,26 @@ export class MediaClient {
     const track = stream.getVideoTracks()[0];
     if (!track) throw new Error("No video track in stream");
 
-    const defaultEncodings = mediaType === "screen"
-      ? { maxBitrate: 2_500_000 }
-      : { maxBitrate: 1_500_000, maxFramerate: 30 };
+    const maxBr = encodingOptions?.maxBitrate;
+    const maxFps = encodingOptions?.maxFramerate;
 
-    const enc = { ...defaultEncodings, ...encodingOptions };
+    // Simulcast: 3 layers for webcam, 2 for screen share
+    const encodings = mediaType === "screen"
+      ? [
+          { rid: "q", maxBitrate: Math.round((maxBr ?? 2_500_000) * 0.25), scaleResolutionDownBy: 2 },
+          { rid: "f", maxBitrate: maxBr ?? 2_500_000 },
+        ]
+      : [
+          { rid: "q", maxBitrate: 150_000, scaleResolutionDownBy: 4, maxFramerate: maxFps ?? 30 },
+          { rid: "h", maxBitrate: Math.round((maxBr ?? 1_500_000) * 0.35), scaleResolutionDownBy: 2, maxFramerate: maxFps ?? 30 },
+          { rid: "f", maxBitrate: maxBr ?? 1_500_000, maxFramerate: maxFps ?? 30 },
+        ];
 
     this.pendingMediaType = mediaType;
     const producer = await this.sendTransport!.produce({
       track,
-      encodings: [enc],
+      encodings,
+      codecOptions: { videoGoogleStartBitrate: 300 },
     });
 
     this.producers.set(mediaType, producer);
@@ -172,6 +191,15 @@ export class MediaClient {
     });
 
     return producer;
+  }
+
+  setPreferredLayers(consumerId: string, spatialLayer: number, temporalLayer?: number): void {
+    this.signaling.send({
+      type: "set-preferred-layers",
+      consumerId,
+      spatialLayer,
+      ...(temporalLayer !== undefined ? { temporalLayer } : {}),
+    });
   }
 
   stopProducer(mediaType: string): void {

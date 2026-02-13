@@ -13,9 +13,15 @@ const RESOLUTION_MAP = {
 } as const;
 
 let mediaClientRef: import("../lib/media-client").MediaClient | null = null;
+const producerMediaTypes = new Map<string, "webcam" | "screen">();
 
 export function setVideoMediaClient(mc: import("../lib/media-client").MediaClient | null): void {
   mediaClientRef = mc;
+}
+
+export function requestVideoLayer(consumerId: string, spatialLayer: number): void {
+  if (!mediaClientRef) return;
+  mediaClientRef.setPreferredLayers(consumerId, spatialLayer);
 }
 
 export function useVideo() {
@@ -34,6 +40,7 @@ export function useVideo() {
 
       const mediaType = data.mediaType as "webcam" | "screen";
       console.log("[video] new-producer from", data.userId, mediaType, data.producerId);
+      producerMediaTypes.set(data.producerId, mediaType);
 
       if (!mediaClientRef) return;
 
@@ -55,11 +62,10 @@ export function useVideo() {
 
     // Wire up the video consumer callback on the media client
     if (mediaClientRef) {
-      mediaClientRef.setOnVideoConsumerCreated((userId, _consumer, stream, _mediaType) => {
-        // Determine actual mediaType from the producer info — for now default to "webcam"
-        // The server sends mediaType in new-producer but not in consume-result,
-        // so we track it via the new-producer listener above
-        useVideoStore.getState().addRemoteVideo(userId, "webcam", stream);
+      mediaClientRef.setOnVideoConsumerCreated((userId, consumer, stream, _mediaType) => {
+        // Look up the actual mediaType from the producerId tracked via new-producer
+        const mt = producerMediaTypes.get(consumer.producerId) ?? "webcam";
+        useVideoStore.getState().addRemoteVideo(userId, mt, stream, consumer.id);
       });
     }
 
@@ -75,10 +81,11 @@ export function useVideo() {
       console.error("[video] Cannot start webcam — E2EE key not established");
       return;
     }
+    let stream: MediaStream | null = null;
     try {
       const { webcamResolution, webcamFps, webcamBitrate } = useSettingsStore.getState();
       const res = RESOLUTION_MAP[webcamResolution];
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: res.width }, height: { ideal: res.height }, frameRate: { ideal: webcamFps } },
       });
       await mediaClientRef.produceVideo(stream, "webcam", {
@@ -88,8 +95,9 @@ export function useVideo() {
       useVideoStore.getState().setLocalWebcamStream(stream);
       useVideoStore.getState().setWebcamActive(true);
       console.log("[video] Webcam started");
-    } catch (err) {
-      console.error("[video] Failed to start webcam:", err);
+    } catch (err: any) {
+      if (stream) for (const t of stream.getTracks()) t.stop();
+      console.error("[video] Failed to start webcam:", err?.message ?? err);
     }
   }, []);
 
@@ -112,8 +120,9 @@ export function useVideo() {
       useVideoStore.getState().setShowSourcePicker(false);
       return;
     }
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           mandatory: {
@@ -139,8 +148,9 @@ export function useVideo() {
       useVideoStore.getState().setScreenShareActive(true);
       useVideoStore.getState().setShowSourcePicker(false);
       console.log("[video] Screen share started with source:", sourceId);
-    } catch (err) {
-      console.error("[video] Failed to start screen share:", err);
+    } catch (err: any) {
+      if (stream) for (const t of stream.getTracks()) t.stop();
+      console.error("[video] Failed to start screen share:", err?.message ?? err);
       useVideoStore.getState().setShowSourcePicker(false);
     }
   }, []);
@@ -179,5 +189,10 @@ export function useVideo() {
     }
   }, [startScreenShare, stopScreenShare]);
 
-  return { webcamActive, screenShareActive, showSourcePicker, toggleWebcam, toggleScreenShare, startWebcam, stopWebcam, startScreenShare, startScreenShareWithSource, stopScreenShare };
+  const requestLayer = useCallback((consumerId: string, spatialLayer: number) => {
+    if (!mediaClientRef) return;
+    mediaClientRef.setPreferredLayers(consumerId, spatialLayer);
+  }, []);
+
+  return { webcamActive, screenShareActive, showSourcePicker, toggleWebcam, toggleScreenShare, startWebcam, stopWebcam, startScreenShare, startScreenShareWithSource, stopScreenShare, requestLayer };
 }

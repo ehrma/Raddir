@@ -17,10 +17,12 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Speaking indicators** — Green ring on avatars for yourself and other users
 
 ### Video & Screen Share
-- **Webcam support** — 720p/30fps video via mediasoup SFU, permission-gated per role
+- **Webcam support** — Configurable resolution (480p/720p/1080p), fps, and bitrate via settings; permission-gated per role
 - **Screen sharing** — Share entire screen or individual window via native OS picker
-- **E2EE video** — Same AES-256-GCM Insertable Streams pipeline as voice; server cannot decode video frames
-- **Video grid** — Responsive tile layout above chat; screen shares get priority sizing
+- **E2EE video** — Same AES-256-GCM Insertable Streams pipeline as voice; all simulcast layers encrypted; server cannot decode video frames
+- **Simulcast** — 3-layer webcam (quarter/half/full resolution), 2-layer screen share; viewers receive low quality in grid, high quality when maximized
+- **Producer limits** — Server-configurable max concurrent webcams (default 5) and screen shares (default 1) per channel; enforced server-side
+- **Video grid** — Responsive tile layout above chat; click to maximize any feed; screen shares get priority sizing
 - **Video indicators** — Camera and monitor icons in user list show who is sharing
 
 ### Security & Privacy
@@ -252,6 +254,14 @@ packages/
 Mic → Opus encode → [E2EE: AES-256-GCM encrypt] → DTLS-SRTP → mediasoup SFU → DTLS-SRTP → [E2EE: AES-256-GCM decrypt] → Opus decode → Speaker
 ```
 
+### Video Pipeline
+
+```
+Camera/Screen → VP8/VP9 encode → [Simulcast: 3 layers] → [E2EE: AES-256-GCM encrypt per layer] → DTLS-SRTP → mediasoup SFU → DTLS-SRTP → [E2EE: AES-256-GCM decrypt] → VP8/VP9 decode → Display
+```
+
+The SFU selects which simulcast layer to forward based on the 10 unencrypted VP8/VP9 header bytes (payload descriptor + keyframe indicator). The actual video content is always encrypted.
+
 ### Security Model
 
 | What | Transport Encrypted? | E2E Encrypted? | Server can read? |
@@ -278,13 +288,23 @@ Your cryptographic identity can be exported as a passphrase-encrypted JSON file 
 
 ## System Requirements
 
+**Audio only:**
+
 | Users | CPU | RAM | Bandwidth |
 |---|---|---|---|
 | 1–25 | 1 core | 256 MB | 5 Mbps |
 | 25–100 | 2 cores | 512 MB | 20 Mbps |
 | 100–500 | 4 cores | 1 GB | 100 Mbps |
 
-These are estimates for audio-only SFU routing with Opus at ~64 kbps per stream.
+**With video (simulcast):**
+
+| Users sharing video | Bandwidth (grid view, low layer) | Bandwidth (1 maximized, rest low) |
+|---|---|---|
+| 5 webcams | ~15 Mbps | ~20 Mbps |
+| 10 webcams | ~60 Mbps | ~70 Mbps |
+| 1 screen share | ~5 Mbps | ~25 Mbps |
+
+Simulcast reduces grid-view bandwidth by ~90% compared to sending full resolution to every viewer. Use the server admin panel to set producer limits appropriate for your bandwidth.
 
 ## License
 

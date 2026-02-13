@@ -105,6 +105,8 @@ export function useConnection() {
         serverName: data.serverName,
         serverDescription: data.serverDescription,
         serverIconUrl: data.serverIconUrl,
+        maxWebcamProducers: data.maxWebcamProducers,
+        maxScreenProducers: data.maxScreenProducers,
         channels: data.channels,
         members: data.members,
         roles: data.roles,
@@ -117,6 +119,8 @@ export function useConnection() {
       if (msg.serverName !== undefined) updates.serverName = msg.serverName;
       if (msg.serverDescription !== undefined) updates.serverDescription = msg.serverDescription;
       if (msg.serverIconUrl !== undefined) updates.serverIconUrl = msg.serverIconUrl;
+      if (msg.maxWebcamProducers !== undefined) updates.maxWebcamProducers = msg.maxWebcamProducers;
+      if (msg.maxScreenProducers !== undefined) updates.maxScreenProducers = msg.maxScreenProducers;
       store.setState(updates);
     });
 

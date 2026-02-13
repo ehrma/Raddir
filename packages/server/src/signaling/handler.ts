@@ -13,7 +13,7 @@ import {
 import type { RtpCapabilities } from "mediasoup/types";
 import { nanoid } from "nanoid";
 import type { RaddirConfig } from "../config.js";
-import { ensureDefaultServer } from "../models/server.js";
+import { ensureDefaultServer, getServer } from "../models/server.js";
 import { getChannelsByServer, getChannel, ensureDefaultChannels } from "../models/channel.js";
 import { createUser, getUserByPublicKey, addServerMember, assignRole, unassignRole, getUserRoleIds, getUserAvatarPath } from "../models/user.js";
 import { getRolesByServer, getDefaultRole, ensureDefaultRoles } from "../models/permission.js";
@@ -50,7 +50,7 @@ function getChannelClients(channelId: string): ConnectedClient[] {
   return Array.from(clients.values()).filter((c) => c.channelId === channelId);
 }
 
-function getServerClients(serverId: string): ConnectedClient[] {
+export function getServerClients(serverId: string): ConnectedClient[] {
   return Array.from(clients.values()).filter((c) => c.serverId === serverId);
 }
 
@@ -109,7 +109,8 @@ function getMsgCategory(type: string): string {
     case "produce":
     case "stop-producer":
     case "consume":
-    case "resume-consumer": return "media";
+    case "resume-consumer":
+    case "set-preferred-layers": return "media";
     default: return "general";
   }
 }
@@ -360,6 +361,8 @@ async function handleAuth(
     serverName: server.name,
     serverDescription: server.description,
     serverIconUrl: server.iconPath ? `/api/servers/${server.id}/icon` : null,
+    maxWebcamProducers: server.maxWebcamProducers,
+    maxScreenProducers: server.maxScreenProducers,
     channels,
     members,
     roles: roleInfos,
@@ -427,6 +430,10 @@ async function handleMessage(client: ConnectedClient, msg: ClientMessage): Promi
 
     case "resume-consumer":
       await handleResumeConsumer(client, msg.consumerId);
+      break;
+
+    case "set-preferred-layers":
+      handleSetPreferredLayers(client, msg.consumerId, msg.spatialLayer, msg.temporalLayer);
       break;
 
     case "chat":
@@ -623,6 +630,31 @@ async function handleProduce(
 
   const mediaType = msg.mediaType ?? "mic";
 
+  // Enforce per-channel producer limits for video/screen
+  if (mediaType === "webcam" || mediaType === "screen") {
+    const server = getServer(client.serverId);
+    if (server) {
+      const channelClients = getChannelClients(client.channelId);
+      let count = 0;
+      for (const c of channelClients) {
+        const peer = getPeerTransports(c.userId);
+        if (!peer) continue;
+        for (const p of peer.producers.values()) {
+          if (!p.closed && (p.appData as any)?.mediaType === mediaType) count++;
+        }
+      }
+      const limit = mediaType === "webcam" ? server.maxWebcamProducers : server.maxScreenProducers;
+      if (count >= limit) {
+        send(client.ws, {
+          type: "error",
+          code: "PRODUCER_LIMIT",
+          message: `Maximum ${limit} ${mediaType === "webcam" ? "webcam" : "screen share"} stream${limit !== 1 ? "s" : ""} reached in this channel`,
+        });
+        return;
+      }
+    }
+  }
+
   // Permission check based on media type
   if (mediaType === "mic") {
     if (!clientHasPermission(client, "speak", client.channelId)) {
@@ -712,6 +744,24 @@ async function handleResumeConsumer(client: ConnectedClient, consumerId: string)
   if (consumer) {
     await consumer.resume();
   }
+}
+
+function handleSetPreferredLayers(
+  client: ConnectedClient,
+  consumerId: string,
+  spatialLayer: number,
+  temporalLayer?: number
+): void {
+  const peer = getPeerTransports(client.userId);
+  if (!peer) return;
+  const consumer = peer.consumers.get(consumerId);
+  if (!consumer) return;
+
+  const layer = Math.max(0, Math.min(2, spatialLayer));
+  consumer.setPreferredLayers({
+    spatialLayer: layer,
+    ...(temporalLayer !== undefined ? { temporalLayer: Math.max(0, Math.min(2, temporalLayer)) } : {}),
+  });
 }
 
 function handleChat(

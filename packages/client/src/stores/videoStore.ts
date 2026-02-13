@@ -3,6 +3,7 @@ import { create } from "zustand";
 export interface RemoteVideo {
   stream: MediaStream;
   mediaType: "webcam" | "screen";
+  consumerId: string;
 }
 
 export interface VideoState {
@@ -18,7 +19,7 @@ export interface VideoState {
   setShowSourcePicker: (show: boolean) => void;
   setLocalWebcamStream: (stream: MediaStream | null) => void;
   setLocalScreenStream: (stream: MediaStream | null) => void;
-  addRemoteVideo: (userId: string, mediaType: "webcam" | "screen", stream: MediaStream) => void;
+  addRemoteVideo: (userId: string, mediaType: "webcam" | "screen", stream: MediaStream, consumerId: string) => void;
   removeRemoteVideo: (userId: string, mediaType: "webcam" | "screen") => void;
   removeAllRemoteVideosForUser: (userId: string) => void;
   clearAll: () => void;
@@ -38,10 +39,10 @@ export const useVideoStore = create<VideoState>((set) => ({
   setLocalWebcamStream: (stream) => set({ localWebcamStream: stream }),
   setLocalScreenStream: (stream) => set({ localScreenStream: stream }),
 
-  addRemoteVideo: (userId, mediaType, stream) =>
+  addRemoteVideo: (userId, mediaType, stream, consumerId) =>
     set((s) => {
       const updated = new Map(s.remoteVideos);
-      updated.set(`${userId}:${mediaType}`, { stream, mediaType });
+      updated.set(`${userId}:${mediaType}`, { stream, mediaType, consumerId });
       return { remoteVideos: updated };
     }),
 

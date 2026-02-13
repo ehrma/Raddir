@@ -71,34 +71,38 @@ export function MainLayout() {
                 </span>
               )}
               <div className="ml-auto flex items-center gap-1">
-                {can("video") && (
+                <span title={!can("video") ? "You do not have sufficient rights to use video" : webcamActive ? "Stop Camera" : "Start Camera"}>
                   <button
-                    onClick={toggleWebcam}
+                    onClick={can("video") ? toggleWebcam : undefined}
+                    disabled={!can("video")}
                     className={cn(
                       "p-1.5 rounded-md transition-colors",
-                      webcamActive
-                        ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
-                        : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
+                      !can("video")
+                        ? "text-surface-600 cursor-not-allowed opacity-50 pointer-events-none"
+                        : webcamActive
+                          ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                          : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
                     )}
-                    title={webcamActive ? "Stop Camera" : "Start Camera"}
                   >
                     {webcamActive ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
                   </button>
-                )}
-                {can("screenShare") && (
+                </span>
+                <span title={!can("screenShare") ? "You do not have sufficient rights to share your screen" : screenShareActive ? "Stop Screen Share" : "Share Screen"}>
                   <button
-                    onClick={toggleScreenShare}
+                    onClick={can("screenShare") ? toggleScreenShare : undefined}
+                    disabled={!can("screenShare")}
                     className={cn(
                       "p-1.5 rounded-md transition-colors",
-                      screenShareActive
-                        ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
-                        : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
+                      !can("screenShare")
+                        ? "text-surface-600 cursor-not-allowed opacity-50 pointer-events-none"
+                        : screenShareActive
+                          ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                          : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
                     )}
-                    title={screenShareActive ? "Stop Screen Share" : "Share Screen"}
                   >
                     {screenShareActive ? <Monitor className="w-4 h-4" /> : <MonitorOff className="w-4 h-4" />}
                   </button>
-                )}
+                </span>
               </div>
             </div>
 
