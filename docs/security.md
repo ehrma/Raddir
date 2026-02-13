@@ -31,10 +31,28 @@ Raddir uses **two layers** of encryption for voice and text:
 - **Connection metadata**: who is connected, from which IP, at what time
 - **Channel membership**: who is in which channel
 - **User state**: muted/deafened status, nickname, role assignments
+- **User avatars and server icons**: uploaded as plaintext images (intentionally public — see below)
+- **Server name, description, and configuration**: server-side metadata
+- **Roles and permissions**: server-side authorization data
 - **RTP packet metadata**: packet sizes, timing, sequence numbers (needed for SFU routing)
 - **Signaling messages**: join/leave events, transport negotiation parameters
 
 > This is the same trust model as Signal: the server handles routing and metadata, but content is cryptographically inaccessible.
+
+## Intentionally Unencrypted Data
+
+The following data is **not** end-to-end encrypted by design:
+
+| Data | Why it's not E2EE | Risk |
+|---|---|---|
+| User avatars | Intentionally public — visible to all server members | None (cosmetic) |
+| Server icon / name / description | Server-side metadata managed by admins | None (cosmetic) |
+| Roles and permissions | Server-side authorization — the server must evaluate permissions to enforce access control | None (authorization metadata) |
+| Nicknames | Displayed to all members; server needs them for routing and member lists | None (public identity) |
+
+These are analogous to a Discord server icon or a TeamSpeak server name — they are metadata that the server must know to function. Encrypting them would provide no security benefit since they are shown to all members anyway.
+
+**E2EE protects _content_ (voice audio and text messages). Metadata and cosmetic data are not content.**
 
 ## How E2EE Works
 

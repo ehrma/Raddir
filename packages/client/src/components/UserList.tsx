@@ -6,6 +6,7 @@ import { Mic, MicOff, VolumeX, Volume2, ShieldCheck } from "lucide-react";
 import { cn } from "../lib/cn";
 import { VolumeSlider } from "./VolumeSlider";
 import { VerifyUserDialog } from "./VerifyUserDialog";
+import { getApiBase } from "../lib/api-base";
 
 export function UserList() {
   const { currentChannelId, members, userId } = useServerStore();
@@ -42,16 +43,27 @@ export function UserList() {
                 isSpeaking && "bg-accent/10"
               )}
             >
-              <div
-                className={cn(
-                  "w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0",
-                  isSpeaking
-                    ? "bg-accent text-white ring-2 ring-accent/50"
-                    : "bg-surface-700 text-surface-300"
-                )}
-              >
-                {member.nickname.charAt(0).toUpperCase()}
-              </div>
+              {member.avatarUrl ? (
+                <img
+                  src={`${getApiBase()}${member.avatarUrl}`}
+                  alt=""
+                  className={cn(
+                    "w-6 h-6 rounded-full object-cover flex-shrink-0",
+                    isSpeaking && "ring-2 ring-green-400 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
+                  )}
+                />
+              ) : (
+                <div
+                  className={cn(
+                    "w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0",
+                    isSpeaking
+                      ? "bg-green-500/30 text-green-400 ring-2 ring-green-400 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
+                      : "bg-surface-700 text-surface-300"
+                  )}
+                >
+                  {member.nickname.charAt(0).toUpperCase()}
+                </div>
+              )}
 
               <span
                 className={cn(

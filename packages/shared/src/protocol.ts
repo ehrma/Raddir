@@ -329,6 +329,7 @@ export interface SessionInfo {
   isDeafened: boolean;
   publicKey?: string;
   roleIds?: string[];
+  avatarUrl?: string | null;
 }
 
 export interface RoleInfo {

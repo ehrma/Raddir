@@ -38,10 +38,11 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Encrypted credential storage** — Passwords, admin tokens, and session credentials are encrypted at rest using Electron's OS-level `safeStorage` API (DPAPI on Windows, Keychain on macOS, libsecret on Linux). Falls back to plaintext in browser mode
 - **Rate limiting** — IP-based sliding-window rate limiting on WebSocket auth and public invite endpoints
 - **CORS policy** — Restricted to Electron (`file://`, `app://`) and localhost dev origins
-- **Role-based permissions** — Admin, Member, Guest roles with granular permission control
+- **Server customization** — Set a custom server name, description, and icon via the admin panel; changes broadcast live to all connected clients
+- **Role-based permissions** — Admin, Member, Guest roles with granular permission control and role colors
 - **Channel permission overrides** — Per-channel permission tweaks per role
 - **Effective permissions viewer** — See computed permissions for any user
-- **Admin panel** — Manage channels, users (kick/ban), invite codes, roles, and overrides
+- **Admin panel** — General settings, channels, users (kick/ban/role assignment), invite codes, roles, overrides, and effective permissions
 - **Ban system** — Ban users by identity; persisted across reconnects
 
 ### Client
@@ -54,7 +55,8 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **User verification UI** — Click any user to verify via safety number; verified badge in channel tree and user list
 - **Your identity card** — Click yourself to see your fingerprint with a copy button
 - **E2EE text chat** — Per-channel encrypted chat with in-memory message history across channel switches
-- **Settings panel** — Audio, keybinds, appearance, and identity tabs
+- **User avatars** — Upload a profile picture from settings; displayed in channel tree, user list, and chat messages (rounded, with speaking glow)
+- **Settings panel** — Profile, audio, keybinds, appearance, and identity tabs
 - **Identity management** — View fingerprint, export/import encrypted identity backup, manage verified users
 - **Join/leave sounds** — Audio cues when users enter or leave channels
 - **Reconnect overlay** — Automatic reconnection handling with visual feedback
@@ -250,6 +252,8 @@ Mic → Opus encode → [E2EE: AES-256-GCM encrypt] → DTLS-SRTP → mediasoup 
 | Text chat | ✅ WSS (TLS) | ✅ AES-256-GCM | ❌ **No** |
 | Signaling / metadata | ✅ WSS (TLS) | — | ✅ Yes (routing) |
 | Identity keys | ✅ WSS (TLS) | — | ✅ Public keys only |
+| User avatars / server icon | ✅ WSS (TLS) | — | ✅ Yes (intentionally public) |
+| Roles / permissions | ✅ WSS (TLS) | — | ✅ Yes (server authorization) |
 | Telemetry | — | — | ❌ None sent |
 
 > The server sees *metadata* (who connects, when, to which channel). It **cannot** see or hear *content*. This is the same trust model as Signal.
