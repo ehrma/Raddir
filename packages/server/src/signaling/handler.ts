@@ -91,6 +91,7 @@ const MSG_RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
 
 function getMsgCategory(type: string): string {
   switch (type) {
+    case "chat":
     case "chat-message": return "chat";
     case "e2ee": return "e2ee";
     case "speaking": return "speaking";

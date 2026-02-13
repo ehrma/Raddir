@@ -6,7 +6,7 @@ import { getSignalingClient, getKeyManager } from "./useConnection";
 import { MediaClient } from "../lib/media-client";
 import { VoiceActivityDetector } from "../lib/audio/vad";
 import { playJoinSound, playLeaveSound, playMuteSound, playUnmuteSound } from "../lib/audio/sounds";
-import { setFrameEncryptionKey, resetFrameCrypto } from "../lib/e2ee/frame-crypto";
+import { setFrameEncryptionKey, resetFrameCrypto, supportsEncodedTransform } from "../lib/e2ee/frame-crypto";
 import { setActiveMediaClient } from "../lib/audio/audio-bridge";
 import type { ServerJoinedChannelMessage, ServerNewProducerMessage } from "@raddir/shared";
 
@@ -63,6 +63,13 @@ export function useAudio() {
         // Send our RTP capabilities to the server so it can create consumers for us
         if (mediaClient.rtpCapabilities) {
           signaling.send({ type: "rtp-capabilities", rtpCapabilities: mediaClient.rtpCapabilities });
+        }
+
+        // Require RTCRtpScriptTransform — without it, frames would be sent as plaintext
+        if (!supportsEncodedTransform()) {
+          console.error("[audio] RTCRtpScriptTransform not supported — cannot encrypt voice frames, aborting audio");
+          useVoiceStore.getState().setE2eeActive(false, 0);
+          return;
         }
 
         // Wire E2EE key to frame encryption and track active state

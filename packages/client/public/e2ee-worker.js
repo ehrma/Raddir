@@ -11,7 +11,7 @@ let currentKey = null;
 
 async function encryptFrame(encodedFrame, controller) {
   if (!currentKey) {
-    controller.enqueue(encodedFrame);
+    // No key — drop frame to prevent sending unencrypted audio
     return;
   }
 
@@ -44,7 +44,7 @@ async function encryptFrame(encodedFrame, controller) {
 
 async function decryptFrame(encodedFrame, controller) {
   if (!currentKey) {
-    controller.enqueue(encodedFrame);
+    // No key — drop frame to prevent playing garbage / unencrypted audio
     return;
   }
 
