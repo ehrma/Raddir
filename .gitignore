@@ -1,14 +1,36 @@
 node_modules/
 dist/
-*.db
-*.db-journal
-.env
-.env.local
-*.log
-.DS_Store
-Thumbs.db
-coverage/
-.turbo/
+dist-electron/
 out/
 release/
-dist-electron/
+coverage/
+.turbo/
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Data / generated certs
+data/
+*.pem
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

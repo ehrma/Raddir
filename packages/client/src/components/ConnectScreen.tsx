@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useSettingsStore, type SavedServer } from "../stores/settingsStore";
-import { useServerStore } from "../stores/serverStore";
-import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, LockOpen, Ticket, Pencil } from "lucide-react";
+import { useSettingsStore } from "../stores/settingsStore";
+import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, Ticket, Pencil } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useConnection } from "../hooks/useConnection";
 import { SettingsPanel } from "./Settings/SettingsPanel";
@@ -63,47 +62,37 @@ export function ConnectScreen() {
         const json = atob(b64);
         decoded = JSON.parse(json);
         if (decoded.v !== 1 || !decoded.a || !decoded.t) throw new Error();
-      } catch (e) {
-        console.error("[invite] Failed to decode invite blob:", e);
+      } catch {
         setInviteError("Invalid invite code");
         setRedeeming(false);
         return;
       }
 
       const serverAddress = decoded.a;
-      console.log("[invite] Decoded invite blob:", { address: serverAddress, token: decoded.t });
 
       // Trust the server host for self-signed certs
       try {
         const wsUrl = normalizeServerUrl(serverAddress);
         const serverHost = new URL(wsUrl.replace(/^ws/, "http")).host;
         (window as any).raddir?.trustServerHost(serverHost);
-        console.log("[invite] Trusted server host:", serverHost);
-      } catch (e) {
-        console.warn("[invite] Failed to trust server host:", e);
-      }
+      } catch {}
 
       // Derive HTTPS base URL from the address
       let apiHost = serverAddress.replace(/^(wss?|https?):\/\//, "").replace(/\/ws\/?$/, "");
       if (!apiHost.includes(":")) apiHost += ":4000";
       const apiBase = "https://" + apiHost;
-      console.log("[invite] API base:", apiBase);
 
       // Get or create identity for the public key
       let publicKey: string;
       try {
         const identity = await getOrCreateIdentity();
         publicKey = identity.publicKeyHex;
-        console.log("[invite] Public key ready");
-      } catch (e) {
-        console.error("[invite] Failed to generate identity key:", e);
+      } catch {
         setInviteError("Failed to generate identity key");
         setRedeeming(false);
         return;
       }
 
-      // Call the redeem endpoint
-      console.log("[invite] Calling redeem endpoint...");
       const res = await fetch(`${apiBase}/api/invites/redeem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -111,7 +100,6 @@ export function ConnectScreen() {
       });
 
       const data = await res.json();
-      console.log("[invite] Redeem response:", res.status, data);
       if (!res.ok) {
         setInviteError(data.error || "Failed to redeem invite");
         setRedeeming(false);
@@ -128,7 +116,6 @@ export function ConnectScreen() {
         setInviteCode("");
         setShowInviteForm(false);
         setRedeeming(false);
-        console.log("[invite] Credential updated for existing server:", existing.name);
         return;
       } else {
         // Auto-add the server using the store's addServer action
@@ -143,11 +130,9 @@ export function ConnectScreen() {
         }
       }
 
-      console.log("[invite] Server added successfully");
       setInviteCode("");
       setShowInviteForm(false);
     } catch (err: any) {
-      console.error("[invite] Redeem failed:", err);
       setInviteError(err.message || "Failed to redeem invite");
     }
     setRedeeming(false);
