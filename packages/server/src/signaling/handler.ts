@@ -114,6 +114,9 @@ async function handleAuth(
   ws: WebSocket,
   msg: Extract<ClientMessage, { type: "auth" }>
 ): Promise<ConnectedClient> {
+  // Resolve server early so credential checks can be scoped to it
+  const server = ensureDefaultServer();
+
   // Check server password or session credential
   if (serverConfig.password) {
     let authenticated = false;
@@ -123,12 +126,12 @@ async function handleAuth(
       authenticated = true;
     }
 
-    // Option 2: Session credential (from invite redemption)
+    // Option 2: Session credential (from invite redemption) — scoped to this server
     if (!authenticated && msg.credential && msg.publicKey) {
       const db = getDb();
       const cred = db.prepare(
-        "SELECT id FROM session_credentials WHERE credential = ? AND user_public_key = ? AND revoked_at IS NULL"
-      ).get(msg.credential, msg.publicKey) as any;
+        "SELECT id FROM session_credentials WHERE credential = ? AND user_public_key = ? AND server_id = ? AND revoked_at IS NULL"
+      ).get(msg.credential, msg.publicKey, server.id) as any;
       if (cred) {
         authenticated = true;
       }
@@ -165,9 +168,6 @@ async function handleAuth(
     success: true,
     userId: user.id,
   });
-
-  // Auto-join default server
-  const server = ensureDefaultServer();
 
   // Check if user is banned
   if (isUserBanned(user.id, server.id)) {

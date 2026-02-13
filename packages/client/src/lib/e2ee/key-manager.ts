@@ -23,10 +23,16 @@ export class KeyManager {
   private peerPublicKeys = new Map<string, CryptoKey>();
   private peerIdentityKeys = new Map<string, string>();
   private signaling: SignalingClient;
-  private onKeyChanged?: (key: CryptoKey, epoch: number) => void;
+  private onKeyChangedListeners: Array<(key: CryptoKey | null, epoch: number) => void> = [];
 
   constructor(signaling: SignalingClient) {
     this.signaling = signaling;
+  }
+
+  private notifyKeyChanged(): void {
+    for (const cb of this.onKeyChangedListeners) {
+      cb(this.channelKey, this.keyEpoch);
+    }
   }
 
   async initialize(): Promise<void> {
@@ -144,7 +150,7 @@ export class KeyManager {
           this.ecdhKeyPair.privateKey
         );
         this.keyEpoch = payload.keyEpoch;
-        this.onKeyChanged?.(this.channelKey, this.keyEpoch);
+        this.notifyKeyChanged();
         break;
       }
 
@@ -152,7 +158,7 @@ export class KeyManager {
         if (this.channelKey) {
           this.channelKey = await ratchetKey(this.channelKey);
           this.keyEpoch = payload.keyEpoch;
-          this.onKeyChanged?.(this.channelKey, this.keyEpoch);
+          this.notifyKeyChanged();
         }
         break;
       }
@@ -163,7 +169,7 @@ export class KeyManager {
     this.isKeyHolder = true;
     this.channelKey = await generateChannelKey();
     this.keyEpoch++;
-    this.onKeyChanged?.(this.channelKey, this.keyEpoch);
+    this.notifyKeyChanged();
 
     // Distribute key to all known peers
     if (this.ecdhKeyPair) {
@@ -198,7 +204,7 @@ export class KeyManager {
     if (this.isKeyHolder && this.channelKey) {
       this.channelKey = await ratchetKey(this.channelKey);
       this.keyEpoch++;
-      this.onKeyChanged?.(this.channelKey, this.keyEpoch);
+      this.notifyKeyChanged();
 
       this.signaling.send({
         type: "e2ee",
@@ -217,8 +223,11 @@ export class KeyManager {
     }
   }
 
-  setOnKeyChanged(callback: (key: CryptoKey, epoch: number) => void): void {
-    this.onKeyChanged = callback;
+  onKeyChanged(callback: (key: CryptoKey | null, epoch: number) => void): () => void {
+    this.onKeyChangedListeners.push(callback);
+    return () => {
+      this.onKeyChangedListeners = this.onKeyChangedListeners.filter((cb) => cb !== callback);
+    };
   }
 
   getChannelKey(): CryptoKey | null {

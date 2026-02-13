@@ -71,7 +71,7 @@ export function useAudio() {
           const key = km.getChannelKey();
           setFrameEncryptionKey(key);
           useVoiceStore.getState().setE2eeActive(!!key, km.getKeyEpoch());
-          km.setOnKeyChanged((newKey, epoch) => {
+          km.onKeyChanged((newKey, epoch) => {
             setFrameEncryptionKey(newKey);
             useVoiceStore.getState().setE2eeActive(!!newKey, epoch);
           });

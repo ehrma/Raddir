@@ -1,7 +1,12 @@
 import { exportKey } from "./crypto";
 
-// Ports to all active e2ee workers (so we can broadcast key updates)
-const activePorts: MessagePort[] = [];
+interface TransformEntry {
+  port: MessagePort;
+  worker: Worker;
+}
+
+// Active transform workers + their message ports
+const activeTransforms: TransformEntry[] = [];
 let currentKey: CryptoKey | null = null;
 
 /**
@@ -18,75 +23,72 @@ export function supportsEncodedTransform(): boolean {
 export async function setFrameEncryptionKey(key: CryptoKey | null): Promise<void> {
   currentKey = key;
   if (!key) {
-    for (const port of activePorts) {
-      port.postMessage({ type: "clearKey" });
+    for (const entry of activeTransforms) {
+      entry.port.postMessage({ type: "clearKey" });
     }
     return;
   }
   const raw = await exportKey(key);
-  for (const port of activePorts) {
-    port.postMessage({ type: "setKey", key: raw }, [raw.slice(0)]);
+  for (const entry of activeTransforms) {
+    const copy = raw.slice(0);
+    entry.port.postMessage({ type: "setKey", key: copy }, [copy]);
   }
 }
 
 /**
- * Apply an RTCRtpScriptTransform to a sender (encrypt) or receiver (decrypt).
- * Creates a dedicated Worker and MessageChannel for each transform.
+ * Create a Worker + MessageChannel, wire RTCRtpScriptTransform, and register for key updates.
+ */
+function createTransform(name: "encrypt" | "decrypt"): TransformEntry {
+  const worker = new Worker("/e2ee-worker.js");
+  const channel = new MessageChannel();
+  const entry: TransformEntry = { port: channel.port1, worker };
+  activeTransforms.push(entry);
+
+  const transform = new (globalThis as any).RTCRtpScriptTransform(
+    worker,
+    { name, port: channel.port2 },
+    [channel.port2]
+  );
+
+  // Send current key immediately if available
+  if (currentKey) {
+    exportKey(currentKey).then((raw) => {
+      const copy = raw.slice(0);
+      channel.port1.postMessage({ type: "setKey", key: copy }, [copy]);
+    });
+  }
+  channel.port1.start();
+
+  return { ...entry, transform } as TransformEntry & { transform: any };
+}
+
+/**
+ * Apply an RTCRtpScriptTransform to a sender (encrypt outgoing frames).
  */
 export function applyEncryptTransform(sender: RTCRtpSender): void {
   if (!supportsEncodedTransform()) return;
-
-  const worker = new Worker("/e2ee-worker.js");
-  const channel = new MessageChannel();
-  activePorts.push(channel.port1);
-
-  const transform = new (globalThis as any).RTCRtpScriptTransform(
-    worker,
-    { name: "encrypt", port: channel.port2 },
-    [channel.port2]
-  );
+  const { transform } = createTransform("encrypt") as any;
   (sender as any).transform = transform;
-
-  // Send current key immediately if available
-  if (currentKey) {
-    exportKey(currentKey).then((raw) => {
-      channel.port1.postMessage({ type: "setKey", key: raw }, [raw]);
-    });
-  }
-  channel.port1.start();
-}
-
-export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
-  if (!supportsEncodedTransform()) return;
-
-  const worker = new Worker("/e2ee-worker.js");
-  const channel = new MessageChannel();
-  activePorts.push(channel.port1);
-
-  const transform = new (globalThis as any).RTCRtpScriptTransform(
-    worker,
-    { name: "decrypt", port: channel.port2 },
-    [channel.port2]
-  );
-  (receiver as any).transform = transform;
-
-  // Send current key immediately if available
-  if (currentKey) {
-    exportKey(currentKey).then((raw) => {
-      channel.port1.postMessage({ type: "setKey", key: raw }, [raw]);
-    });
-  }
-  channel.port1.start();
 }
 
 /**
- * Clean up all active worker ports.
+ * Apply an RTCRtpScriptTransform to a receiver (decrypt incoming frames).
+ */
+export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
+  if (!supportsEncodedTransform()) return;
+  const { transform } = createTransform("decrypt") as any;
+  (receiver as any).transform = transform;
+}
+
+/**
+ * Clean up all active workers and ports. Call when leaving a channel.
  */
 export function resetFrameCrypto(): void {
-  for (const port of activePorts) {
-    port.postMessage({ type: "clearKey" });
-    port.close();
+  for (const entry of activeTransforms) {
+    entry.port.postMessage({ type: "clearKey" });
+    entry.port.close();
+    entry.worker.terminate();
   }
-  activePorts.length = 0;
+  activeTransforms.length = 0;
   currentKey = null;
 }

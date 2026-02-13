@@ -8,17 +8,6 @@ const IV_LENGTH = 12;
 const TAG_LENGTH = 128;
 
 let currentKey = null;
-let senderId = 0;
-let frameCounter = 0;
-
-function generateIV(counter, sid) {
-  const iv = new Uint8Array(IV_LENGTH);
-  const view = new DataView(iv.buffer);
-  view.setUint32(0, sid, true);
-  view.setUint32(4, counter >>> 0, true);
-  view.setUint32(8, (counter / 0x100000000) >>> 0, true);
-  return iv;
-}
 
 async function encryptFrame(encodedFrame, controller) {
   if (!currentKey) {
@@ -31,7 +20,7 @@ async function encryptFrame(encodedFrame, controller) {
     const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
     const payload = data.slice(UNENCRYPTED_BYTES);
 
-    const iv = generateIV(frameCounter++, senderId);
+    const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const encrypted = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv, tagLength: TAG_LENGTH },
       currentKey,
@@ -49,8 +38,7 @@ async function encryptFrame(encodedFrame, controller) {
     encodedFrame.data = newData;
     controller.enqueue(encodedFrame);
   } catch {
-    // On error, pass through unencrypted
-    controller.enqueue(encodedFrame);
+    // E2EE active but encrypt failed — drop frame to prevent sending unencrypted
   }
 }
 
@@ -85,8 +73,7 @@ async function decryptFrame(encodedFrame, controller) {
     encodedFrame.data = newData;
     controller.enqueue(encodedFrame);
   } catch {
-    // Decryption failed — pass through (may be unencrypted frame)
-    controller.enqueue(encodedFrame);
+    // E2EE active but decrypt failed — drop frame to prevent garbage audio
   }
 }
 
@@ -111,8 +98,6 @@ self.onrtctransform = (event) => {
         });
       } else if (msg.type === "clearKey") {
         currentKey = null;
-      } else if (msg.type === "setSenderId") {
-        senderId = msg.senderId;
       }
     };
     options.port.start();

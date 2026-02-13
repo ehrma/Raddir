@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useServerStore } from "../stores/serverStore";
 import { getSignalingClient, getKeyManager } from "../hooks/useConnection";
-import { Send, Lock, ShieldAlert } from "lucide-react";
+import { Send, Lock, ShieldAlert, ShieldEllipsis } from "lucide-react";
 import {
   encryptFrame,
   decryptFrame,
@@ -24,7 +24,17 @@ export function TextChat() {
   const channelMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [hasKey, setHasKey] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Track channel key availability
+  useEffect(() => {
+    const km = getKeyManager();
+    if (!km) { setHasKey(false); return; }
+    setHasKey(!!km.getChannelKey());
+    const unsub = km.onKeyChanged((key: CryptoKey | null) => setHasKey(!!key));
+    return unsub;
+  }, [currentChannelId]);
 
   // Sync displayed messages when channel changes
   useEffect(() => {
@@ -53,15 +63,12 @@ export function TextChat() {
     let ciphertext: string;
     let iv: string;
 
-    if (channelKey) {
-      const ivBytes = generateRandomIV();
-      const encrypted = await encryptFrame(channelKey, plaintext.buffer as ArrayBuffer, ivBytes);
-      ciphertext = arrayBufferToBase64(encrypted);
-      iv = arrayBufferToBase64(ivBytes.buffer as ArrayBuffer);
-    } else {
-      ciphertext = btoa(input.trim());
-      iv = "";
-    }
+    if (!channelKey) return; // Never send unencrypted
+
+    const ivBytes = generateRandomIV();
+    const encrypted = await encryptFrame(channelKey, plaintext.buffer as ArrayBuffer, ivBytes);
+    ciphertext = arrayBufferToBase64(encrypted);
+    iv = arrayBufferToBase64(ivBytes.buffer as ArrayBuffer);
 
     client.send({
       type: "chat",
@@ -99,7 +106,7 @@ export function TextChat() {
             content = "[encrypted — no key]";
           }
         } else {
-          content = atob(msg.ciphertext);
+          content = "[unencrypted message]";
         }
 
         const newMsg: ChatMessage = {
@@ -152,8 +159,11 @@ export function TextChat() {
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3 min-w-0">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-surface-500">
-            <Lock className="w-5 h-5 mb-2" />
-            <p className="text-xs">Messages are end-to-end encrypted</p>
+            {hasKey ? (
+              <><Lock className="w-5 h-5 mb-2 text-green-500" /><p className="text-xs">Messages are end-to-end encrypted</p></>
+            ) : (
+              <><ShieldEllipsis className="w-5 h-5 mb-2 text-yellow-500" /><p className="text-xs">Negotiating encryption keys…</p></>
+            )}
           </div>
         )}
         {messages.map((msg) => (
@@ -186,12 +196,13 @@ export function TextChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Send an encrypted message..."
-            className="flex-1 px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:border-accent"
+            placeholder={hasKey ? "Send an encrypted message…" : "Waiting for encryption keys…"}
+            disabled={!hasKey}
+            className="flex-1 px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:border-accent disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() || !hasKey}
             className="p-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Send className="w-4 h-4" />
