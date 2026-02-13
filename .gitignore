@@ -23,6 +23,7 @@ data/
 
 # Review tracking
 e2ee-review-round3.md
+BUGS.md
 
 # Logs
 *.log
