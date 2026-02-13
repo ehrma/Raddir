@@ -8,6 +8,7 @@ import { cn } from "../lib/cn";
 import { VerifyUserDialog } from "./VerifyUserDialog";
 import { getStoredIdentityPublicKey, computeFingerprint } from "../lib/e2ee/identity";
 import { getUserRoleColor } from "../lib/role-color";
+import { getApiBase } from "../lib/api-base";
 import type { Channel, SessionInfo } from "@raddir/shared";
 
 interface ChannelNode extends Channel {
@@ -192,18 +193,29 @@ function ChannelUserEntry({ user }: { user: SessionInfo }) {
           isMe ? "text-accent" : "text-surface-400 hover:text-surface-200"
         )}
       >
-        <div
-          className={cn(
-            "w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-medium flex-shrink-0 transition-all",
-            isSpeaking
-              ? "bg-accent/30 text-accent ring-1 ring-accent"
-              : isMe
-                ? "bg-accent/20 text-accent"
-                : "bg-surface-700 text-surface-400"
-          )}
-        >
-          {user.nickname.charAt(0).toUpperCase()}
-        </div>
+        {user.avatarUrl ? (
+          <img
+            src={`${getApiBase()}${user.avatarUrl}`}
+            alt=""
+            className={cn(
+              "w-4 h-4 rounded-full object-cover flex-shrink-0 transition-all",
+              isSpeaking && "ring-2 ring-green-400 shadow-[0_0_6px_rgba(74,222,128,0.6)]"
+            )}
+          />
+        ) : (
+          <div
+            className={cn(
+              "w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-medium flex-shrink-0 transition-all",
+              isSpeaking
+                ? "bg-green-500/30 text-green-400 ring-2 ring-green-400 shadow-[0_0_6px_rgba(74,222,128,0.6)]"
+                : isMe
+                  ? "bg-accent/20 text-accent"
+                  : "bg-surface-700 text-surface-400"
+            )}
+          >
+            {user.nickname.charAt(0).toUpperCase()}
+          </div>
+        )}
         <span className="truncate" style={roleColor ? { color: roleColor } : undefined}>{user.nickname}</span>
         {isMe && <span className="text-[9px] text-surface-500 flex-shrink-0">(you)</span>}
         {isVerified && <ShieldCheck className="w-2.5 h-2.5 text-green-400 flex-shrink-0" />}

@@ -5,13 +5,13 @@ import { getSignalingClient } from "../hooks/useConnection";
 import { usePermissions } from "../hooks/usePermissions";
 import { getApiBase, getAuthHeaders } from "../lib/api-base";
 import { cn } from "../lib/cn";
-import { Plus, Ban, Shield, X, Hash } from "lucide-react";
+import { Plus, Ban, Shield, X, Hash, Upload, Image } from "lucide-react";
 import { RoleEditor } from "./Admin/RoleEditor";
 import { ChannelOverrides } from "./Admin/ChannelOverrides";
 import { EffectivePerms } from "./Admin/EffectivePerms";
 
 export function AdminPanel({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<"channels" | "users" | "invites" | "roles" | "overrides" | "perms">("channels");
+  const [tab, setTab] = useState<"general" | "channels" | "users" | "invites" | "roles" | "overrides" | "perms">("general");
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
@@ -27,7 +27,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
 
         <div className="flex flex-1 min-h-0">
           <div className="w-36 border-r border-surface-800 p-2 space-y-0.5 flex-shrink-0">
-            {(["channels", "users", "invites", "roles", "overrides", "perms"] as const).map((t) => (
+            {(["general", "channels", "users", "invites", "roles", "overrides", "perms"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -42,6 +42,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="flex-1 p-4 min-h-[500px] overflow-y-auto">
+            {tab === "general" && <ServerSettings />}
             {tab === "channels" && <ChannelAdmin />}
             {tab === "users" && <UserAdmin />}
             {tab === "invites" && <InviteAdmin />}
@@ -328,6 +329,197 @@ function InviteAdmin() {
         Share this invite code with users who want to join. They can paste it on the connect screen to auto-add this server.
         The server password is never included — the code grants a personal credential instead.
       </p>
+    </div>
+  );
+}
+
+function ServerSettings() {
+  const { serverId, serverName, serverDescription, serverIconUrl } = useServerStore();
+  const [name, setName] = useState(serverName ?? "");
+  const [description, setDescription] = useState(serverDescription ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [iconPreview, setIconPreview] = useState<string | null>(null);
+  const [uploadingIcon, setUploadingIcon] = useState(false);
+  const [iconError, setIconError] = useState<string | null>(null);
+
+  const iconSrc = serverIconUrl ? `${getApiBase()}${serverIconUrl}` : null;
+
+  useEffect(() => {
+    setName(serverName ?? "");
+    setDescription(serverDescription ?? "");
+  }, [serverName, serverDescription]);
+
+  const handleSave = async () => {
+    if (!serverId || !name.trim()) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      const res = await fetch(`${getApiBase()}/api/servers/${serverId}`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name: name.trim(), description }),
+      });
+      if (res.ok) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
+    } catch (err) {
+      console.error("[admin] Failed to update server:", err);
+    }
+    setSaving(false);
+  };
+
+  const handleIconSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setIconError("Image too large. Maximum 2MB.");
+      return;
+    }
+
+    const allowedTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+    if (!allowedTypes.includes(file.type)) {
+      setIconError("Unsupported format. Use PNG, JPEG, WebP, or GIF.");
+      return;
+    }
+
+    setIconError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setIconPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleIconUpload = async () => {
+    if (!serverId || !iconPreview) return;
+    setUploadingIcon(true);
+    setIconError(null);
+    try {
+      // Extract base64 data and mime type from data URL
+      const match = iconPreview.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (!match) {
+        setIconError("Invalid image data");
+        setUploadingIcon(false);
+        return;
+      }
+
+      const res = await fetch(`${getApiBase()}/api/servers/${serverId}/icon`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ data: match[2], mimeType: match[1] }),
+      });
+      if (res.ok) {
+        setIconPreview(null);
+        // Force icon refresh by updating store with cache-busted URL
+        const data = await res.json();
+        useServerStore.setState({ serverIconUrl: data.iconUrl + `?t=${Date.now()}` });
+      } else {
+        const body = await res.json().catch(() => ({ error: "Upload failed" }));
+        setIconError(body.error ?? "Upload failed");
+      }
+    } catch (err) {
+      console.error("[admin] Failed to upload icon:", err);
+      setIconError("Network error");
+    }
+    setUploadingIcon(false);
+  };
+
+  const handleIconDelete = async () => {
+    if (!serverId) return;
+    try {
+      const res = await fetch(`${getApiBase()}/api/servers/${serverId}/icon`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        useServerStore.setState({ serverIconUrl: null });
+        setIconPreview(null);
+      }
+    } catch (err) {
+      console.error("[admin] Failed to delete icon:", err);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Server Icon */}
+      <div>
+        <label className="text-xs font-medium text-surface-300 mb-2 block">Server Icon</label>
+        <div className="flex items-start gap-4">
+          <div className="relative group">
+            {iconPreview ? (
+              <img src={iconPreview} alt="Preview" className="w-20 h-20 rounded-xl object-cover border-2 border-accent/50" />
+            ) : iconSrc ? (
+              <img src={iconSrc} alt="Server icon" className="w-20 h-20 rounded-xl object-cover border border-surface-700" />
+            ) : (
+              <div className="w-20 h-20 rounded-xl bg-surface-800 border border-surface-700 flex items-center justify-center">
+                <Image className="w-8 h-8 text-surface-600" />
+              </div>
+            )}
+          </div>
+          <div className="space-y-2 flex-1">
+            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface-800 border border-surface-700 rounded-lg text-xs text-surface-300 hover:border-surface-600 hover:text-surface-200 transition-colors cursor-pointer">
+              <Upload className="w-3 h-3" /> Choose Image
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleIconSelect} className="hidden" />
+            </label>
+            {iconPreview && (
+              <button
+                onClick={handleIconUpload}
+                disabled={uploadingIcon}
+                className="ml-2 px-3 py-1.5 bg-accent text-white text-xs rounded-lg hover:bg-accent-hover disabled:opacity-50 transition-colors"
+              >
+                {uploadingIcon ? "Uploading..." : "Upload"}
+              </button>
+            )}
+            {(iconSrc && !iconPreview) && (
+              <button
+                onClick={handleIconDelete}
+                className="ml-2 px-3 py-1.5 text-xs text-red-400 bg-red-400/10 rounded-lg hover:bg-red-400/20 transition-colors"
+              >
+                Remove Icon
+              </button>
+            )}
+            <p className="text-[9px] text-surface-500">Square image recommended. PNG, JPEG, WebP, or GIF. Max 2MB.</p>
+            {iconError && <p className="text-[10px] text-red-400">{iconError}</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* Server Name */}
+      <div>
+        <label className="text-xs font-medium text-surface-300 mb-1.5 block">Server Name</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="My Server"
+          className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:border-accent"
+        />
+      </div>
+
+      {/* Server Description */}
+      <div>
+        <label className="text-xs font-medium text-surface-300 mb-1.5 block">Server Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="A short description of your server..."
+          rows={3}
+          className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:border-accent resize-none"
+        />
+      </div>
+
+      {/* Save Button */}
+      <button
+        onClick={handleSave}
+        disabled={saving || !name.trim()}
+        className="px-4 py-2 bg-accent text-white text-xs rounded-lg hover:bg-accent-hover disabled:opacity-50 transition-colors"
+      >
+        {saving ? "Saving..." : saved ? "Saved!" : "Save Changes"}
+      </button>
     </div>
   );
 }

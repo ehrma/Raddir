@@ -330,6 +330,18 @@ const MIGRATIONS: Migration[] = [
         WHERE credential_hash IS NOT NULL AND revoked_at IS NULL;
     `,
   },
+  {
+    name: "012_server_icon",
+    sql: `
+      ALTER TABLE servers ADD COLUMN icon_path TEXT DEFAULT NULL;
+    `,
+  },
+  {
+    name: "013_user_avatar",
+    sql: `
+      ALTER TABLE users ADD COLUMN avatar_path TEXT DEFAULT NULL;
+    `,
+  },
 ];
 
 export function closeDb(): void {

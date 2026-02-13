@@ -3,6 +3,7 @@ import { useServerStore } from "../stores/serverStore";
 import { getSignalingClient, getKeyManager } from "../hooks/useConnection";
 import { Send, Lock, ShieldAlert, ShieldEllipsis } from "lucide-react";
 import { getUserRoleColor } from "../lib/role-color";
+import { getApiBase } from "../lib/api-base";
 import {
   encryptFrame,
   decryptFrame,
@@ -21,7 +22,7 @@ interface ChatMessage {
 }
 
 export function TextChat() {
-  const { currentChannelId } = useServerStore();
+  const { currentChannelId, members } = useServerStore();
   const channelMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -167,9 +168,19 @@ export function TextChat() {
             )}
           </div>
         )}
-        {messages.map((msg) => (
+        {messages.map((msg) => {
+          const member = members.get(msg.userId);
+          const avatarUrl = member?.avatarUrl;
+          return (
           <div key={msg.id} className="group min-w-0">
             <div className="flex items-center gap-2">
+              {avatarUrl ? (
+                <img src={`${getApiBase()}${avatarUrl}`} alt="" className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-surface-700 flex items-center justify-center text-[9px] font-medium text-surface-400 flex-shrink-0">
+                  {msg.nickname.charAt(0).toUpperCase()}
+                </div>
+              )}
               <span className="text-sm font-medium" style={{ color: getUserRoleColor(msg.userId) ?? undefined }}>
                 {msg.nickname}
               </span>
@@ -185,7 +196,8 @@ export function TextChat() {
             </div>
             <p className="text-sm text-surface-300 mt-0.5 break-all">{msg.content}</p>
           </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 

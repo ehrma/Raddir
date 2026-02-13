@@ -12,6 +12,7 @@ import { serverRoutes } from "./api/routes/servers.js";
 import { channelRoutes } from "./api/routes/channels.js";
 import { inviteRoutes } from "./api/routes/invites.js";
 import { roleRoutes } from "./api/routes/roles.js";
+import { userRoutes } from "./api/routes/users.js";
 import { getTlsConfig, scheduleRenewal, type TlsMode, type TlsOptions } from "./tls.js";
 import cors from "@fastify/cors";
 import { setAdminToken, setOpenAdmin } from "./api/auth.js";
@@ -125,6 +126,7 @@ async function main(): Promise<void> {
   await fastify.register(channelRoutes);
   await fastify.register(inviteRoutes);
   await fastify.register(roleRoutes);
+  await fastify.register(userRoutes);
 
   // Start Fastify and get the underlying HTTP server
   await fastify.listen({ host: config.host, port: config.port });

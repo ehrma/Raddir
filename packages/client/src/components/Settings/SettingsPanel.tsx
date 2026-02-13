@@ -3,12 +3,14 @@ import { AudioSettings } from "./AudioSettings";
 import { KeybindSettings } from "./KeybindSettings";
 import { IdentitySettings } from "./IdentitySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
-import { X, Volume2, Keyboard, Shield, Palette } from "lucide-react";
+import { ProfileSettings } from "./ProfileSettings";
+import { X, Volume2, Keyboard, Shield, Palette, User } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-type Tab = "audio" | "keybinds" | "identity" | "appearance";
+type Tab = "profile" | "audio" | "keybinds" | "identity" | "appearance";
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: "profile", label: "Profile", icon: <User className="w-4 h-4" /> },
   { id: "audio", label: "Audio", icon: <Volume2 className="w-4 h-4" /> },
   { id: "keybinds", label: "Keybinds", icon: <Keyboard className="w-4 h-4" /> },
   { id: "appearance", label: "Appearance", icon: <Palette className="w-4 h-4" /> },
@@ -16,7 +18,7 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<Tab>("audio");
+  const [activeTab, setActiveTab] = useState<Tab>("profile");
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -54,6 +56,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
           {/* Content */}
           <div className="flex-1 p-5 min-h-0 overflow-y-auto">
+            {activeTab === "profile" && <ProfileSettings />}
             {activeTab === "audio" && <AudioSettings />}
             {activeTab === "keybinds" && <KeybindSettings />}
             {activeTab === "appearance" && <AppearanceSettings />}

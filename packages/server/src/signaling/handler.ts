@@ -15,7 +15,7 @@ import { nanoid } from "nanoid";
 import type { RaddirConfig } from "../config.js";
 import { ensureDefaultServer } from "../models/server.js";
 import { getChannelsByServer, getChannel, ensureDefaultChannels } from "../models/channel.js";
-import { createUser, getUserByPublicKey, addServerMember, assignRole, unassignRole, getUserRoleIds } from "../models/user.js";
+import { createUser, getUserByPublicKey, addServerMember, assignRole, unassignRole, getUserRoleIds, getUserAvatarPath } from "../models/user.js";
 import { getRolesByServer, getDefaultRole, ensureDefaultRoles } from "../models/permission.js";
 import { computeEffectivePermissions, hasPermission } from "../permissions/engine.js";
 import { createBan, isUserBanned } from "../models/ban.js";
@@ -331,6 +331,7 @@ async function handleAuth(
     isDeafened: c.isDeafened,
     publicKey: c.publicKey,
     roleIds: getUserRoleIds(c.userId, server.id),
+    avatarUrl: getUserAvatarPath(c.userId) ? `/api/users/${c.userId}/avatar` : null,
   }));
 
   const roleInfos: RoleInfo[] = roles.map((r) => ({
@@ -355,6 +356,9 @@ async function handleAuth(
   send(ws, {
     type: "joined-server",
     serverId: server.id,
+    serverName: server.name,
+    serverDescription: server.description,
+    serverIconUrl: server.iconPath ? `/api/servers/${server.id}/icon` : null,
     channels,
     members,
     roles: roleInfos,
@@ -508,6 +512,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
     isDeafened: c.isDeafened,
     publicKey: c.publicKey,
     roleIds: client.serverId ? getUserRoleIds(c.userId, client.serverId) : [],
+    avatarUrl: getUserAvatarPath(c.userId) ? `/api/users/${c.userId}/avatar` : null,
   }));
 
   send(client.ws, {
@@ -545,6 +550,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
       isDeafened: client.isDeafened,
       publicKey: client.publicKey,
       roleIds: client.serverId ? getUserRoleIds(client.userId, client.serverId) : [],
+      avatarUrl: getUserAvatarPath(client.userId) ? `/api/users/${client.userId}/avatar` : null,
     },
   }, client.userId);
 

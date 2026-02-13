@@ -76,6 +76,17 @@ export function unassignRole(userId: string, serverId: string, roleId: string): 
   ).run(userId, serverId, roleId);
 }
 
+export function updateUserAvatar(userId: string, avatarPath: string | null): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET avatar_path = ? WHERE id = ?").run(avatarPath, userId);
+}
+
+export function getUserAvatarPath(userId: string): string | null {
+  const db = getDb();
+  const row = db.prepare("SELECT avatar_path FROM users WHERE id = ?").get(userId) as any;
+  return row?.avatar_path ?? null;
+}
+
 export function getUserRoleIds(userId: string, serverId: string): string[] {
   const db = getDb();
   const rows = db.prepare(
