@@ -4,24 +4,26 @@ import { getDb } from "../../db/database.js";
 import { requireAdmin } from "../auth.js";
 
 /**
- * Encode an invite blob: base64url-encoded JSON containing only the token.
- * Server address is stored server-side and returned on redeem — never trust the blob for routing.
+ * Encode an invite blob: base64url-encoded JSON with server address and token.
+ * The address is a routing hint so the client knows where to connect.
+ * The server never trusts the blob's address for authorization — it validates
+ * the token against its own DB and returns the canonical address from there.
  */
-function encodeInviteBlob(token: string): string {
-  const blob = JSON.stringify({ v: 2, t: token });
+function encodeInviteBlob(serverAddress: string, token: string): string {
+  const blob = JSON.stringify({ v: 1, a: serverAddress, t: token });
   return Buffer.from(blob, "utf-8").toString("base64url");
 }
 
 /**
- * Decode an invite blob back to { token }.
- * Supports v1 (legacy: had address) and v2 (current: token only).
+ * Decode an invite blob back to { address, token }.
+ * The address is only used by the client for connectivity — never for auth.
  */
-function decodeInviteBlob(encoded: string): { token: string } | null {
+function decodeInviteBlob(encoded: string): { address: string; token: string } | null {
   try {
     const json = Buffer.from(encoded, "base64url").toString("utf-8");
     const parsed = JSON.parse(json);
-    if (!parsed.t) return null;
-    return { token: parsed.t };
+    if (!parsed.a || !parsed.t) return null;
+    return { address: parsed.a, token: parsed.t };
   } catch {
     return null;
   }
@@ -56,7 +58,7 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(id, serverId, token, createdBy, maxUses ?? null, expiresAt, serverAddress);
 
-      const inviteBlob = encodeInviteBlob(token);
+      const inviteBlob = encodeInviteBlob(serverAddress, token);
 
       reply.status(201);
       return { id, token, serverId, maxUses: maxUses ?? null, expiresAt, inviteBlob };
@@ -191,11 +193,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "Invalid invite blob" };
       }
 
-      // Look up server address from DB — never trust the blob for routing
+      // Return canonical address from DB if available, otherwise fall back to blob hint
       const db = getDb();
       const row = db.prepare("SELECT server_address FROM invite_tokens WHERE token = ?").get(decoded.token) as any;
 
-      return { address: row?.server_address || "", token: decoded.token };
+      return { address: row?.server_address || decoded.address, token: decoded.token };
     }
   );
 }
