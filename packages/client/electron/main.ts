@@ -2,7 +2,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, n
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { createSign, createVerify, generateKeyPairSync, createHash } from "node:crypto";
+import { sign as cryptoSign, generateKeyPairSync } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -204,11 +204,9 @@ ipcMain.handle("identity-get-public-key", () => {
 
 ipcMain.handle("identity-sign", (_event, data: string) => {
   const id = loadIdentity() ?? generateAndStoreIdentity();
-  const sign = createSign("Ed25519");
-  // Ed25519 does not use a separate digest — pass data directly
-  sign.end(Buffer.from(data, "utf-8"));
-  // Node's Ed25519 sign: no digest algorithm needed, just call sign with the PEM key
-  return sign.sign(id.privateKeyPem).toString("base64");
+  // Ed25519: use crypto.sign with null algorithm (Ed25519 doesn't use a separate digest)
+  const signature = cryptoSign(null, Buffer.from(data, "utf-8"), id.privateKeyPem);
+  return signature.toString("base64");
 });
 
 ipcMain.handle("identity-get-algorithm", () => {

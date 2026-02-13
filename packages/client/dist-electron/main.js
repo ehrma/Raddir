@@ -2,7 +2,7 @@ import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, s
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
-import { createSign, generateKeyPairSync } from "node:crypto";
+import { sign, generateKeyPairSync } from "node:crypto";
 const __filename$1 = fileURLToPath(import.meta.url);
 const __dirname$1 = dirname(__filename$1);
 let mainWindow = null;
@@ -155,9 +155,8 @@ ipcMain.handle("identity-get-public-key", () => {
 });
 ipcMain.handle("identity-sign", (_event, data) => {
   const id = loadIdentity() ?? generateAndStoreIdentity();
-  const sign = createSign("Ed25519");
-  sign.end(Buffer.from(data, "utf-8"));
-  return sign.sign(id.privateKeyPem).toString("base64");
+  const signature = sign(null, Buffer.from(data, "utf-8"), id.privateKeyPem);
+  return signature.toString("base64");
 });
 ipcMain.handle("identity-get-algorithm", () => {
   const id = loadIdentity() ?? generateAndStoreIdentity();
