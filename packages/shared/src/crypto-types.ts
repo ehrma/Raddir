@@ -3,6 +3,8 @@ export interface E2EEPublicKeyAnnounce {
   ecdhPublicKey: string;
   identityPublicKey: string;
   signature: string;
+  channelId: string;
+  serverId: string;
   targetUserId?: string;
 }
 
@@ -14,6 +16,8 @@ export interface E2EEEncryptedChannelKey {
   keyEpoch: number;
   identityPublicKey: string;
   signature: string;
+  channelId: string;
+  serverId: string;
 }
 
 export interface E2EEKeyRatchet {
@@ -22,18 +26,28 @@ export interface E2EEKeyRatchet {
   reason: "member-left" | "periodic" | "manual";
   identityPublicKey: string;
   signature: string;
+  channelId: string;
+  serverId: string;
 }
 
 export interface E2EEVerificationRequest {
   kind: "verification-request";
   targetUserId: string;
   safetyNumber: string;
+  identityPublicKey: string;
+  signature: string;
+  channelId: string;
+  serverId: string;
 }
 
 export interface E2EEVerificationConfirm {
   kind: "verification-confirm";
   targetUserId: string;
   confirmed: boolean;
+  identityPublicKey: string;
+  signature: string;
+  channelId: string;
+  serverId: string;
 }
 
 export type E2EEKeyExchangeMessage =

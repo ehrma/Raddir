@@ -20,6 +20,8 @@ export class KeyManager {
   private isKeyHolder = false;
   private localUserId: string | null = null;
   private localIdentityPublicKey: string | null = null;
+  private currentChannelId: string | null = null;
+  private currentServerId: string | null = null;
   private channelMemberIds = new Set<string>();
   private peerPublicKeys = new Map<string, CryptoKey>();
   private peerIdentityKeys = new Map<string, string>();
@@ -40,6 +42,15 @@ export class KeyManager {
     this.ecdhKeyPair = await generateECDHKeyPair();
     const identity = await getOrCreateIdentity();
     this.localIdentityPublicKey = identity.publicKeyHex;
+  }
+
+  /**
+   * Set the current channel context. Must be called before announcePublicKey/electKeyHolder.
+   * channelId + serverId are included in all signed payloads to prevent replay/misroute.
+   */
+  setChannelContext(channelId: string, serverId: string): void {
+    this.currentChannelId = channelId;
+    this.currentServerId = serverId;
   }
 
   /**
@@ -80,11 +91,13 @@ export class KeyManager {
 
   async announcePublicKey(targetUserId?: string): Promise<void> {
     if (!this.ecdhKeyPair) await this.initialize();
-    if (!this.localIdentityPublicKey) return;
+    if (!this.localIdentityPublicKey || !this.currentChannelId || !this.currentServerId) return;
 
     const publicKeyRaw = await exportPublicKey(this.ecdhKeyPair!.publicKey);
     const publicKeyB64 = arrayBufferToBase64(publicKeyRaw);
-    const signature = await signData(`public-key-announce:${publicKeyB64}`);
+    const signature = await signData(
+      `public-key-announce:${publicKeyB64}:${this.currentChannelId}:${this.currentServerId}`
+    );
     if (!signature) {
       console.error("[e2ee] Failed to sign public-key-announce — cannot announce");
       return;
@@ -97,6 +110,8 @@ export class KeyManager {
         ecdhPublicKey: publicKeyB64,
         identityPublicKey: this.localIdentityPublicKey,
         signature,
+        channelId: this.currentChannelId,
+        serverId: this.currentServerId,
         targetUserId,
       },
     });
@@ -111,8 +126,14 @@ export class KeyManager {
           break;
         }
 
+        // Reject if channel context doesn't match local state
+        if (payload.channelId !== this.currentChannelId || payload.serverId !== this.currentServerId) {
+          console.warn(`[e2ee] Rejected public-key-announce from ${fromUserId}: channel/server context mismatch`);
+          break;
+        }
+
         const valid = await verifySignature(
-          `public-key-announce:${payload.ecdhPublicKey}`,
+          `public-key-announce:${payload.ecdhPublicKey}:${payload.channelId}:${payload.serverId}`,
           payload.signature,
           payload.identityPublicKey
         );
@@ -153,6 +174,12 @@ export class KeyManager {
           break;
         }
 
+        // Reject if channel context doesn't match local state
+        if (payload.channelId !== this.currentChannelId || payload.serverId !== this.currentServerId) {
+          console.warn(`[e2ee] Rejected encrypted-channel-key from ${fromUserId}: channel/server context mismatch`);
+          break;
+        }
+
         // Verify against the identity key in the message (and cross-check with known identity)
         const knownIdentity = this.peerIdentityKeys.get(fromUserId);
         if (knownIdentity && knownIdentity !== payload.identityPublicKey) {
@@ -161,7 +188,7 @@ export class KeyManager {
         }
 
         const valid2 = await verifySignature(
-          `encrypted-channel-key:${payload.encryptedKey}:${payload.keyEpoch}`,
+          `encrypted-channel-key:${payload.encryptedKey}:${payload.keyEpoch}:${payload.channelId}:${payload.serverId}`,
           payload.signature,
           payload.identityPublicKey
         );
@@ -190,6 +217,12 @@ export class KeyManager {
           break;
         }
 
+        // Reject if channel context doesn't match local state
+        if (payload.channelId !== this.currentChannelId || payload.serverId !== this.currentServerId) {
+          console.warn(`[e2ee] Rejected key-ratchet from ${fromUserId}: channel/server context mismatch`);
+          break;
+        }
+
         const knownIdentity3 = this.peerIdentityKeys.get(fromUserId);
         if (knownIdentity3 && knownIdentity3 !== payload.identityPublicKey) {
           console.warn(`[e2ee] Rejected key-ratchet from ${fromUserId}: identity key mismatch`);
@@ -197,7 +230,7 @@ export class KeyManager {
         }
 
         const valid3 = await verifySignature(
-          `key-ratchet:${payload.keyEpoch}:${payload.reason}`,
+          `key-ratchet:${payload.keyEpoch}:${payload.reason}:${payload.channelId}:${payload.serverId}`,
           payload.signature,
           payload.identityPublicKey
         );
@@ -231,7 +264,8 @@ export class KeyManager {
   }
 
   private async sendEncryptedKeyTo(targetUserId: string, recipientEcdhKey: CryptoKey): Promise<void> {
-    if (!this.ecdhKeyPair || !this.channelKey || !this.localIdentityPublicKey) return;
+    if (!this.ecdhKeyPair || !this.channelKey || !this.localIdentityPublicKey
+        || !this.currentChannelId || !this.currentServerId) return;
 
     const encrypted = await encryptKeyForRecipient(
       this.channelKey,
@@ -242,7 +276,9 @@ export class KeyManager {
     const senderEcdhB64 = arrayBufferToBase64(
       await exportPublicKey(this.ecdhKeyPair.publicKey)
     );
-    const sig = await signData(`encrypted-channel-key:${encryptedKeyB64}:${this.keyEpoch}`);
+    const sig = await signData(
+      `encrypted-channel-key:${encryptedKeyB64}:${this.keyEpoch}:${this.currentChannelId}:${this.currentServerId}`
+    );
     if (!sig) {
       console.error("[e2ee] Failed to sign encrypted-channel-key — cannot distribute");
       return;
@@ -258,6 +294,8 @@ export class KeyManager {
         keyEpoch: this.keyEpoch,
         identityPublicKey: this.localIdentityPublicKey,
         signature: sig,
+        channelId: this.currentChannelId,
+        serverId: this.currentServerId,
       },
     });
   }
@@ -268,12 +306,15 @@ export class KeyManager {
     this.channelMemberIds.delete(userId);
 
     // If we're the key holder, ratchet the key for forward secrecy
-    if (this.isKeyHolder && this.channelKey && this.localIdentityPublicKey) {
+    if (this.isKeyHolder && this.channelKey && this.localIdentityPublicKey
+        && this.currentChannelId && this.currentServerId) {
       this.channelKey = await ratchetKey(this.channelKey);
       this.keyEpoch++;
       this.notifyKeyChanged();
 
-      const sig = await signData(`key-ratchet:${this.keyEpoch}:member-left`);
+      const sig = await signData(
+        `key-ratchet:${this.keyEpoch}:member-left:${this.currentChannelId}:${this.currentServerId}`
+      );
       if (sig) {
         this.signaling.send({
           type: "e2ee",
@@ -283,6 +324,8 @@ export class KeyManager {
             reason: "member-left",
             identityPublicKey: this.localIdentityPublicKey,
             signature: sig,
+            channelId: this.currentChannelId,
+            serverId: this.currentServerId,
           },
         });
       }
@@ -335,6 +378,8 @@ export class KeyManager {
     this.isKeyHolder = false;
     this.localUserId = null;
     this.localIdentityPublicKey = null;
+    this.currentChannelId = null;
+    this.currentServerId = null;
     this.channelMemberIds.clear();
     this.peerPublicKeys.clear();
     this.peerIdentityKeys.clear();

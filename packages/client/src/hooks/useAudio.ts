@@ -68,6 +68,11 @@ export function useAudio() {
         // Wire E2EE key to frame encryption and track active state
         const km = getKeyManager();
         if (km) {
+          const serverId = useServerStore.getState().serverId;
+          if (serverId) {
+            km.setChannelContext(data.channelId, serverId);
+          }
+
           const key = km.getChannelKey();
           setFrameEncryptionKey(key);
           useVoiceStore.getState().setE2eeActive(!!key, km.getKeyEpoch());
@@ -77,7 +82,7 @@ export function useAudio() {
           });
           km.announcePublicKey();
 
-          // Deterministic key holder election: lowest userId becomes key holder
+          // Deterministic key holder election based on min(hash(identityPublicKey))
           const memberIds = (data.users ?? []).map((u: any) => u.id).concat(currentUserId!);
           await km.electKeyHolder(currentUserId!, memberIds);
         }

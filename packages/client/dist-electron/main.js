@@ -2,7 +2,7 @@ import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, s
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
-import { sign, generateKeyPairSync } from "node:crypto";
+import { createSign, generateKeyPairSync } from "node:crypto";
 const __filename$1 = fileURLToPath(import.meta.url);
 const __dirname$1 = dirname(__filename$1);
 let mainWindow = null;
@@ -110,6 +110,27 @@ ipcMain.handle("safe-storage-decrypt", (_event, encrypted) => {
 ipcMain.handle("get-theme", () => {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";
 });
+function derToP1363(der, componentLength) {
+  let offset = 2;
+  if (der[0] !== 48) throw new Error("Invalid DER signature");
+  if (der[offset] !== 2) throw new Error("Invalid DER signature (r tag)");
+  offset++;
+  const rLen = der[offset];
+  offset++;
+  let r = der.subarray(offset, offset + rLen);
+  offset += rLen;
+  if (der[offset] !== 2) throw new Error("Invalid DER signature (s tag)");
+  offset++;
+  const sLen = der[offset];
+  offset++;
+  let s = der.subarray(offset, offset + sLen);
+  if (r.length > componentLength && r[0] === 0) r = r.subarray(1);
+  if (s.length > componentLength && s[0] === 0) s = s.subarray(1);
+  const result = Buffer.alloc(componentLength * 2);
+  r.copy(result, componentLength - r.length);
+  s.copy(result, componentLength * 2 - s.length);
+  return result;
+}
 let cachedIdentity = null;
 function getIdentityFilePath() {
   const dir = join(app.getPath("userData"), "identity");
@@ -131,7 +152,9 @@ function loadIdentity() {
   }
 }
 function generateAndStoreIdentity() {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const { publicKey, privateKey } = generateKeyPairSync("ec", {
+    namedCurve: "P-256"
+  });
   const publicKeyDer = publicKey.export({ type: "spki", format: "der" });
   const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
   const publicKeyHex = publicKeyDer.toString("hex");
@@ -142,11 +165,11 @@ function generateAndStoreIdentity() {
   const stored = {
     publicKeyHex,
     encryptedPrivateKey,
-    algorithm: "Ed25519",
+    algorithm: "ECDSA-P256",
     createdAt: Date.now()
   };
   writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
-  cachedIdentity = { publicKeyHex, privateKeyPem, algorithm: "Ed25519" };
+  cachedIdentity = { publicKeyHex, privateKeyPem, algorithm: "ECDSA-P256" };
   return cachedIdentity;
 }
 ipcMain.handle("identity-get-public-key", () => {
@@ -155,36 +178,12 @@ ipcMain.handle("identity-get-public-key", () => {
 });
 ipcMain.handle("identity-sign", (_event, data) => {
   const id = loadIdentity() ?? generateAndStoreIdentity();
-  const signature = sign(null, Buffer.from(data, "utf-8"), id.privateKeyPem);
-  return signature.toString("base64");
-});
-ipcMain.handle("identity-get-algorithm", () => {
-  const id = loadIdentity() ?? generateAndStoreIdentity();
-  return id.algorithm;
-});
-ipcMain.handle("identity-import-legacy", (_event, publicKeyHex, privateKeyHex, algorithm) => {
-  if (loadIdentity()) return false;
-  if (!safeStorage.isEncryptionAvailable()) return false;
-  try {
-    const derBuffer = Buffer.from(privateKeyHex, "hex");
-    const b64 = derBuffer.toString("base64");
-    const pem = `-----BEGIN PRIVATE KEY-----
-${b64.match(/.{1,64}/g).join("\n")}
------END PRIVATE KEY-----`;
-    const encryptedPrivateKey = safeStorage.encryptString(pem).toString("base64");
-    const stored = {
-      publicKeyHex,
-      encryptedPrivateKey,
-      algorithm,
-      createdAt: Date.now()
-    };
-    writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
-    cachedIdentity = { publicKeyHex, privateKeyPem: pem, algorithm };
-    return true;
-  } catch (err) {
-    console.error("[identity] Failed to import legacy identity:", err);
-    return false;
-  }
+  const signer = createSign("SHA256");
+  signer.update(Buffer.from(data, "utf-8"));
+  signer.end();
+  const derSig = signer.sign(id.privateKeyPem);
+  const p1363 = derToP1363(derSig, 32);
+  return p1363.toString("base64");
 });
 ipcMain.handle("identity-export", (_event, passphrase) => {
   const id = loadIdentity();

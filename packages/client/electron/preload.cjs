@@ -7,6 +7,12 @@ contextBridge.exposeInMainWorld("raddir", {
   encryptString: (plaintext) => ipcRenderer.invoke("safe-storage-encrypt", plaintext),
   decryptString: (encrypted) => ipcRenderer.invoke("safe-storage-decrypt", encrypted),
   getTheme: () => ipcRenderer.invoke("get-theme"),
+  // Identity key management — private key stays in main process (ECDSA P-256)
+  identityGetPublicKey: () => ipcRenderer.invoke("identity-get-public-key"),
+  identitySign: (data) => ipcRenderer.invoke("identity-sign", data),
+  identityExport: (passphrase) => ipcRenderer.invoke("identity-export", passphrase),
+  identityImportEncrypted: (fileContents, passphrase) =>
+    ipcRenderer.invoke("identity-import-encrypted", fileContents, passphrase),
   onPttPressed: (callback) => {
     ipcRenderer.on("ptt-pressed", callback);
     return () => ipcRenderer.removeListener("ptt-pressed", callback);

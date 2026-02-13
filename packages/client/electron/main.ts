@@ -2,7 +2,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, n
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { sign as cryptoSign, generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, createSign } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -144,6 +144,43 @@ ipcMain.handle("get-theme", () => {
 // ─── Identity Key Management (main process only) ────────────────────────────
 // Private key never leaves the main process. Renderer can only sign and get the public key.
 
+/**
+ * Convert a DER-encoded ECDSA signature to IEEE P1363 format (raw r||s).
+ * Node.js createSign outputs DER, but WebCrypto expects P1363 for ECDSA verify.
+ * @param der - DER-encoded signature buffer
+ * @param componentLength - byte length of each component (32 for P-256)
+ */
+function derToP1363(der: Buffer, componentLength: number): Buffer {
+  // DER: 0x30 <len> 0x02 <rLen> <r> 0x02 <sLen> <s>
+  let offset = 2; // skip SEQUENCE tag + length
+  if (der[0] !== 0x30) throw new Error("Invalid DER signature");
+
+  // Read r
+  if (der[offset] !== 0x02) throw new Error("Invalid DER signature (r tag)");
+  offset++;
+  const rLen = der[offset]!;
+  offset++;
+  let r = der.subarray(offset, offset + rLen);
+  offset += rLen;
+
+  // Read s
+  if (der[offset] !== 0x02) throw new Error("Invalid DER signature (s tag)");
+  offset++;
+  const sLen = der[offset]!;
+  offset++;
+  let s = der.subarray(offset, offset + sLen);
+
+  // Strip leading zero padding (DER uses signed integers)
+  if (r.length > componentLength && r[0] === 0x00) r = r.subarray(1);
+  if (s.length > componentLength && s[0] === 0x00) s = s.subarray(1);
+
+  // Pad to componentLength if shorter
+  const result = Buffer.alloc(componentLength * 2);
+  r.copy(result, componentLength - r.length);
+  s.copy(result, componentLength * 2 - s.length);
+  return result;
+}
+
 interface StoredIdentity {
   publicKeyHex: string;
   encryptedPrivateKey: string; // base64, encrypted via safeStorage
@@ -175,8 +212,10 @@ function loadIdentity(): { publicKeyHex: string; privateKeyPem: string; algorith
 }
 
 function generateAndStoreIdentity(): { publicKeyHex: string; privateKeyPem: string; algorithm: string } {
-  // Use Ed25519 (Node.js has native support)
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  // Use ECDSA P-256 — universally supported (Node.js, Electron/BoringSSL, WebCrypto)
+  const { publicKey, privateKey } = generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
   const publicKeyDer = publicKey.export({ type: "spki", format: "der" });
   const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
   const publicKeyHex = publicKeyDer.toString("hex");
@@ -189,11 +228,11 @@ function generateAndStoreIdentity(): { publicKeyHex: string; privateKeyPem: stri
   const stored: StoredIdentity = {
     publicKeyHex,
     encryptedPrivateKey,
-    algorithm: "Ed25519",
+    algorithm: "ECDSA-P256",
     createdAt: Date.now(),
   };
   writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
-  cachedIdentity = { publicKeyHex, privateKeyPem, algorithm: "Ed25519" };
+  cachedIdentity = { publicKeyHex, privateKeyPem, algorithm: "ECDSA-P256" };
   return cachedIdentity;
 }
 
@@ -204,43 +243,15 @@ ipcMain.handle("identity-get-public-key", () => {
 
 ipcMain.handle("identity-sign", (_event, data: string) => {
   const id = loadIdentity() ?? generateAndStoreIdentity();
-  // Ed25519: use crypto.sign with null algorithm (Ed25519 doesn't use a separate digest)
-  const signature = cryptoSign(null, Buffer.from(data, "utf-8"), id.privateKeyPem);
-  return signature.toString("base64");
+  const signer = createSign("SHA256");
+  signer.update(Buffer.from(data, "utf-8"));
+  signer.end();
+  const derSig = signer.sign(id.privateKeyPem);
+  // Convert DER → IEEE P1363 (raw r||s) for WebCrypto compatibility
+  const p1363 = derToP1363(derSig, 32);
+  return p1363.toString("base64");
 });
 
-ipcMain.handle("identity-get-algorithm", () => {
-  const id = loadIdentity() ?? generateAndStoreIdentity();
-  return id.algorithm;
-});
-
-// Migration: import an existing identity from the renderer (one-time, from localStorage)
-ipcMain.handle("identity-import-legacy", (_event, publicKeyHex: string, privateKeyHex: string, algorithm: string) => {
-  // Only import if we don't already have an identity
-  if (loadIdentity()) return false;
-  if (!safeStorage.isEncryptionAvailable()) return false;
-
-  try {
-    // Convert hex PKCS8 to PEM
-    const derBuffer = Buffer.from(privateKeyHex, "hex");
-    const b64 = derBuffer.toString("base64");
-    const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----`;
-
-    const encryptedPrivateKey = safeStorage.encryptString(pem).toString("base64");
-    const stored: StoredIdentity = {
-      publicKeyHex,
-      encryptedPrivateKey,
-      algorithm,
-      createdAt: Date.now(),
-    };
-    writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
-    cachedIdentity = { publicKeyHex, privateKeyPem: pem, algorithm };
-    return true;
-  } catch (err) {
-    console.error("[identity] Failed to import legacy identity:", err);
-    return false;
-  }
-});
 
 // Export identity (passphrase-encrypted) — crypto stays in main process
 ipcMain.handle("identity-export", (_event, passphrase: string) => {
