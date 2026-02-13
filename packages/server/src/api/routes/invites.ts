@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { getDb } from "../../db/database.js";
 import { requireAdmin } from "../auth.js";
 import { RateLimiter } from "../../lib/rate-limiter.js";
+import { hashCredential } from "../../lib/credential-hash.js";
 
 // 20 requests per 60 seconds per IP for public invite endpoints
 const inviteLimiter = new RateLimiter(20, 60_000);
@@ -167,13 +168,15 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Create an unbound credential — publicKey will be bound on first WS auth
+      // Store only the SHA-256 hash; plaintext is returned to the client but never persisted
       const credentialId = nanoid();
       const credential = nanoid(32);
+      const credHash = hashCredential(credential);
 
       db.prepare(`
-        INSERT INTO session_credentials (id, server_id, credential, invite_token_id)
+        INSERT INTO session_credentials (id, server_id, credential_hash, invite_token_id)
         VALUES (?, ?, ?, ?)
-      `).run(credentialId, row.server_id, credential, row.id);
+      `).run(credentialId, row.server_id, credHash, row.id);
 
       return {
         credential,

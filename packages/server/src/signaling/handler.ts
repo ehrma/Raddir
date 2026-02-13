@@ -2,6 +2,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { Server as HttpServer } from "node:http";
 import { RateLimiter } from "../lib/rate-limiter.js";
+import { hashCredential } from "../lib/credential-hash.js";
 import type {
   ClientMessage,
   ServerMessage,
@@ -153,23 +154,58 @@ async function handleAuth(
       authenticated = true;
     }
 
-    // Option 2: Session credential (from invite redemption)
-    if (!authenticated && msg.credential) {
+    // Option 2: Session credential (from invite redemption) — requires publicKey
+    if (!authenticated && msg.credential && msg.publicKey) {
       const db = getDb();
-      const cred = db.prepare(
-        "SELECT id, user_public_key, bound_at FROM session_credentials WHERE credential = ? AND server_id = ? AND revoked_at IS NULL"
-      ).get(msg.credential, server.id) as any;
+      const credHash = hashCredential(msg.credential);
+
+      // Try hash lookup first (new credentials), then plaintext fallback (legacy)
+      let cred = db.prepare(
+        "SELECT id, user_public_key FROM session_credentials WHERE credential_hash = ? AND server_id = ? AND revoked_at IS NULL"
+      ).get(credHash, server.id) as any;
+
+      if (!cred) {
+        // Fallback: legacy plaintext credential — upgrade to hash on successful auth
+        cred = db.prepare(
+          "SELECT id, user_public_key FROM session_credentials WHERE credential = ? AND server_id = ? AND revoked_at IS NULL"
+        ).get(msg.credential, server.id) as any;
+        if (cred) {
+          // Upgrade: store hash and clear plaintext (best-effort — may fail on old schema)
+          try {
+            db.prepare(
+              "UPDATE session_credentials SET credential_hash = ?, credential = NULL WHERE id = ?"
+            ).run(credHash, cred.id);
+          } catch {
+            // Old schema with NOT NULL on credential — just store the hash alongside
+            try {
+              db.prepare(
+                "UPDATE session_credentials SET credential_hash = ? WHERE id = ?"
+              ).run(credHash, cred.id);
+            } catch { /* ignore — upgrade will happen after migration 008 */ }
+          }
+        }
+      }
 
       if (cred) {
         if (!cred.user_public_key) {
-          // Unbound credential — bind it to this publicKey now (bootstrap identity)
-          if (msg.publicKey) {
-            const now = Math.floor(Date.now() / 1000);
-            db.prepare(
-              "UPDATE session_credentials SET user_public_key = ?, bound_at = ? WHERE id = ?"
-            ).run(msg.publicKey, now, cred.id);
+          // Unbound credential — atomically bind to this publicKey (bootstrap identity)
+          const now = Math.floor(Date.now() / 1000);
+          const result = db.prepare(
+            "UPDATE session_credentials SET user_public_key = ?, bound_at = ? WHERE id = ? AND user_public_key IS NULL"
+          ).run(msg.publicKey, now, cred.id);
+
+          if (result.changes === 1) {
+            authenticated = true;
+          } else {
+            // Race: another client bound it first — re-read and check
+            const reread = db.prepare(
+              "SELECT user_public_key FROM session_credentials WHERE id = ?"
+            ).get(cred.id) as any;
+            if (reread?.user_public_key === msg.publicKey) {
+              authenticated = true;
+            }
+            // Otherwise: bound to a different key, auth fails
           }
-          authenticated = true;
         } else if (cred.user_public_key === msg.publicKey) {
           // Already bound — publicKey matches
           authenticated = true;

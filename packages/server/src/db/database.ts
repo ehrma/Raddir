@@ -239,6 +239,58 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_invite_tokens_token ON invite_tokens(token);
     `,
   },
+  {
+    name: "007_credential_hash",
+    sql: `
+      -- Recreate session_credentials: make credential nullable and add credential_hash.
+      -- New credentials store only the hash; legacy plaintext credentials are upgraded on use.
+      CREATE TABLE session_credentials_new (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        user_public_key TEXT,
+        credential TEXT,
+        credential_hash TEXT,
+        invite_token_id TEXT REFERENCES invite_tokens(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        revoked_at INTEGER,
+        bound_at INTEGER
+      );
+      INSERT INTO session_credentials_new (id, server_id, user_public_key, credential, credential_hash, invite_token_id, created_at, revoked_at, bound_at)
+        SELECT id, server_id, user_public_key, credential, NULL, invite_token_id, created_at, revoked_at, bound_at
+        FROM session_credentials;
+      DROP TABLE session_credentials;
+      ALTER TABLE session_credentials_new RENAME TO session_credentials;
+      CREATE INDEX idx_session_creds_credential ON session_credentials(credential);
+      CREATE INDEX idx_session_creds_hash ON session_credentials(credential_hash);
+      CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
+    `,
+  },
+  {
+    name: "008_fix_credential_nullable",
+    sql: `
+      -- Fix for servers that ran old 007: credential column may still be NOT NULL.
+      -- Recreate with credential nullable if needed.
+      CREATE TABLE session_credentials_v2 (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        user_public_key TEXT,
+        credential TEXT,
+        credential_hash TEXT,
+        invite_token_id TEXT REFERENCES invite_tokens(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        revoked_at INTEGER,
+        bound_at INTEGER
+      );
+      INSERT INTO session_credentials_v2 (id, server_id, user_public_key, credential, credential_hash, invite_token_id, created_at, revoked_at, bound_at)
+        SELECT id, server_id, user_public_key, credential, credential_hash, invite_token_id, created_at, revoked_at, bound_at
+        FROM session_credentials;
+      DROP TABLE session_credentials;
+      ALTER TABLE session_credentials_v2 RENAME TO session_credentials;
+      CREATE INDEX idx_session_creds_credential ON session_credentials(credential);
+      CREATE INDEX idx_session_creds_hash ON session_credentials(credential_hash);
+      CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
+    `,
+  },
 ];
 
 export function closeDb(): void {
