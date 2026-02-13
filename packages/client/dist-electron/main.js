@@ -1,299 +1,209 @@
-import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, session, safeStorage, nativeTheme, desktopCapturer } from "electron";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { writeFileSync, existsSync, unlinkSync, readFileSync, mkdirSync } from "node:fs";
-import { createSign, createPrivateKey, generateKeyPairSync } from "node:crypto";
-const __filename$1 = fileURLToPath(import.meta.url);
-const __dirname$1 = dirname(__filename$1);
-let mainWindow = null;
-let tray = null;
-let trustedServerHost = null;
-function getTrayIconPath() {
-  if (process.env.VITE_DEV_SERVER_URL) {
-    return join(__dirname$1, "../public/raddir-tray-icon.png");
-  }
-  return join(__dirname$1, "../dist/raddir-tray-icon.png");
+import { app as c, nativeImage as L, Tray as q, Menu as M, BrowserWindow as T, globalShortcut as v, ipcMain as s, session as C, safeStorage as l, nativeTheme as b, desktopCapturer as j } from "electron";
+import { dirname as $, join as u } from "node:path";
+import { fileURLToPath as z } from "node:url";
+import { writeFileSync as _, existsSync as m, unlinkSync as G, readFileSync as H, mkdirSync as U } from "node:fs";
+import { createSign as Q, createPrivateKey as Z, generateKeyPairSync as X } from "node:crypto";
+const Y = z(import.meta.url), P = $(Y);
+let i = null, S = null, g = null;
+function V() {
+  return process.env.VITE_DEV_SERVER_URL ? u(P, "../public/raddir-tray-icon.png") : u(P, "../dist/raddir-tray-icon.png");
 }
-function createWindow() {
-  mainWindow = new BrowserWindow({
+function B() {
+  i = new T({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: "Raddir",
-    icon: getTrayIconPath(),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
-    autoHideMenuBar: true,
+    icon: V(),
+    backgroundColor: b.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
+    autoHideMenuBar: !0,
     webPreferences: {
-      preload: join(__dirname$1, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false
+      preload: u(P, "preload.cjs"),
+      contextIsolation: !0,
+      nodeIntegration: !1
     },
-    show: false
-  });
-  mainWindow.once("ready-to-show", () => {
-    mainWindow == null ? void 0 : mainWindow.show();
-  });
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(join(__dirname$1, "../dist/index.html"));
-  }
-  mainWindow.on("closed", () => {
-    mainWindow = null;
+    show: !1
+  }), i.once("ready-to-show", () => {
+    i == null || i.show();
+  }), process.env.VITE_DEV_SERVER_URL ? i.loadURL(process.env.VITE_DEV_SERVER_URL) : i.loadFile(u(P, "../dist/index.html")), i.on("closed", () => {
+    i = null;
   });
 }
-app.on("certificate-error", (event, _webContents, url, _error, _certificate, callback) => {
+c.on("certificate-error", (t, e, n, r, a, o) => {
   try {
-    const parsed = new URL(url);
-    if (trustedServerHost && parsed.host === trustedServerHost) {
-      event.preventDefault();
-      callback(true);
+    const y = new URL(n);
+    if (g && y.host === g) {
+      t.preventDefault(), o(!0);
       return;
     }
   } catch {
   }
-  callback(false);
+  o(!1);
 });
-app.whenReady().then(() => {
-  createWindow();
-  const trayImage = nativeImage.createFromPath(getTrayIconPath());
-  const tempTrayPath = join(app.getPath("temp"), `raddir-tray-${Date.now()}.png`);
-  writeFileSync(tempTrayPath, trayImage.toPNG());
-  tray = new Tray(tempTrayPath);
-  tray.setToolTip("Raddir");
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show Raddir", click: () => mainWindow == null ? void 0 : mainWindow.show() },
+c.whenReady().then(() => {
+  B();
+  const t = L.createFromPath(V()), e = u(c.getPath("temp"), `raddir-tray-${Date.now()}.png`);
+  _(e, t.toPNG()), S = new q(e), S.setToolTip("Raddir"), S.setContextMenu(M.buildFromTemplate([
+    { label: "Show Raddir", click: () => i == null ? void 0 : i.show() },
     { type: "separator" },
-    { label: "Quit", click: () => app.quit() }
-  ]));
-  tray.on("click", () => mainWindow == null ? void 0 : mainWindow.show());
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    { label: "Quit", click: () => c.quit() }
+  ])), S.on("click", () => i == null ? void 0 : i.show()), c.on("activate", () => {
+    T.getAllWindows().length === 0 && B();
   });
 });
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+c.on("window-all-closed", () => {
+  process.platform !== "darwin" && c.quit();
 });
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
+c.on("will-quit", () => {
+  v.unregisterAll();
 });
-ipcMain.handle("register-ptt-key", (_event, key) => {
-  globalShortcut.unregisterAll();
-  if (!key) return;
-  globalShortcut.register(key, () => {
-    mainWindow == null ? void 0 : mainWindow.webContents.send("ptt-pressed");
+s.handle("register-ptt-key", (t, e) => {
+  v.unregisterAll(), e && v.register(e, () => {
+    i == null || i.webContents.send("ptt-pressed");
   });
 });
-ipcMain.handle("unregister-ptt-key", () => {
-  globalShortcut.unregisterAll();
+s.handle("unregister-ptt-key", () => {
+  v.unregisterAll();
 });
-ipcMain.handle("trust-server-host", (_event, host) => {
-  trustedServerHost = host || null;
-  if (trustedServerHost) {
-    const trustedHostname = trustedServerHost.split(":")[0];
-    session.defaultSession.setCertificateVerifyProc((request, callback) => {
-      if (request.hostname === trustedHostname) {
-        callback(0);
+s.handle("trust-server-host", (t, e) => {
+  if (g = e || null, g) {
+    const n = g.split(":")[0];
+    C.defaultSession.setCertificateVerifyProc((r, a) => {
+      if (r.hostname === n) {
+        a(0);
         return;
       }
-      callback(-3);
+      a(-3);
     });
-  } else {
-    session.defaultSession.setCertificateVerifyProc(null);
-  }
+  } else
+    C.defaultSession.setCertificateVerifyProc(null);
 });
-ipcMain.handle("safe-storage-encrypt", (_event, plaintext) => {
-  if (!safeStorage.isEncryptionAvailable()) return null;
-  return safeStorage.encryptString(plaintext).toString("base64");
-});
-ipcMain.handle("safe-storage-decrypt", (_event, encrypted) => {
-  if (!safeStorage.isEncryptionAvailable()) return null;
+s.handle("safe-storage-encrypt", (t, e) => l.isEncryptionAvailable() ? l.encryptString(e).toString("base64") : null);
+s.handle("safe-storage-decrypt", (t, e) => {
+  if (!l.isEncryptionAvailable()) return null;
   try {
-    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+    return l.decryptString(Buffer.from(e, "base64"));
   } catch {
     return null;
   }
 });
-ipcMain.handle("get-theme", () => {
-  return nativeTheme.shouldUseDarkColors ? "dark" : "light";
-});
-ipcMain.handle("get-desktop-sources", async () => {
-  const sources = await desktopCapturer.getSources({
-    types: ["screen", "window"],
-    thumbnailSize: { width: 320, height: 180 }
-  });
-  return sources.map((s) => ({
-    id: s.id,
-    name: s.name,
-    thumbnailDataUrl: s.thumbnail.toDataURL(),
-    display_id: s.display_id
-  }));
-});
-let cachedIdentity = null;
-function getIdentityFilePath() {
-  const dir = join(app.getPath("userData"), "identity");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "identity.json");
+s.handle("get-theme", () => b.shouldUseDarkColors ? "dark" : "light");
+s.handle("get-desktop-sources", async () => (await j.getSources({
+  types: ["screen", "window"],
+  thumbnailSize: { width: 320, height: 180 }
+})).map((e) => ({
+  id: e.id,
+  name: e.name,
+  thumbnailDataUrl: e.thumbnail.toDataURL(),
+  display_id: e.display_id
+})));
+let f = null;
+function w() {
+  const t = u(c.getPath("userData"), "identity");
+  return m(t) || U(t, { recursive: !0 }), u(t, "identity.json");
 }
-function loadIdentity() {
-  if (cachedIdentity) return cachedIdentity;
-  const filePath = getIdentityFilePath();
-  if (!existsSync(filePath)) return null;
+function D() {
+  if (f) return f;
+  const t = w();
+  if (!m(t)) return null;
   try {
-    const stored = JSON.parse(readFileSync(filePath, "utf-8"));
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const privateKeyPem = safeStorage.decryptString(Buffer.from(stored.encryptedPrivateKey, "base64"));
-    cachedIdentity = { publicKeyHex: stored.publicKeyHex, privateKeyPem, algorithm: stored.algorithm };
-    return cachedIdentity;
+    const e = JSON.parse(H(t, "utf-8"));
+    if (!l.isEncryptionAvailable()) return null;
+    const n = l.decryptString(Buffer.from(e.encryptedPrivateKey, "base64"));
+    return f = { publicKeyHex: e.publicKeyHex, privateKeyPem: n, algorithm: e.algorithm }, f;
   } catch {
     return null;
   }
 }
-function generateAndStoreIdentity() {
-  const { publicKey, privateKey } = generateKeyPairSync("ec", {
+function A() {
+  const { publicKey: t, privateKey: e } = X("ec", {
     namedCurve: "P-256"
-  });
-  const publicKeyDer = publicKey.export({ type: "spki", format: "der" });
-  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
-  const publicKeyHex = publicKeyDer.toString("hex");
-  if (!safeStorage.isEncryptionAvailable()) {
+  }), n = t.export({ type: "spki", format: "der" }), r = e.export({ type: "pkcs8", format: "pem" }), a = n.toString("hex");
+  if (!l.isEncryptionAvailable())
     throw new Error("safeStorage not available — cannot store identity securely");
-  }
-  const encryptedPrivateKey = safeStorage.encryptString(privateKeyPem).toString("base64");
-  const stored = {
-    publicKeyHex,
-    encryptedPrivateKey,
+  const o = l.encryptString(r).toString("base64"), y = {
+    publicKeyHex: a,
+    encryptedPrivateKey: o,
     algorithm: "ECDSA-P256",
     createdAt: Date.now()
   };
-  writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
-  cachedIdentity = { publicKeyHex, privateKeyPem, algorithm: "ECDSA-P256" };
-  return cachedIdentity;
+  return _(w(), JSON.stringify(y)), f = { publicKeyHex: a, privateKeyPem: r, algorithm: "ECDSA-P256" }, f;
 }
-ipcMain.handle("identity-get-public-key", () => {
-  const id = loadIdentity() ?? generateAndStoreIdentity();
-  return id.publicKeyHex;
+s.handle("identity-get-public-key", () => (D() ?? A()).publicKeyHex);
+s.handle("identity-sign", (t, e) => {
+  const n = D() ?? A(), r = Q("SHA256");
+  r.update(Buffer.from(e, "utf-8")), r.end();
+  const a = Z(n.privateKeyPem);
+  return r.sign({ key: a, dsaEncoding: "ieee-p1363" }).toString("base64");
 });
-ipcMain.handle("identity-sign", (_event, data) => {
-  const id = loadIdentity() ?? generateAndStoreIdentity();
-  const signer = createSign("SHA256");
-  signer.update(Buffer.from(data, "utf-8"));
-  signer.end();
-  const key = createPrivateKey(id.privateKeyPem);
-  const sig = signer.sign({ key, dsaEncoding: "ieee-p1363" });
-  return sig.toString("base64");
+s.handle("identity-regenerate", () => {
+  const t = w();
+  return m(t) && G(t), f = null, A().publicKeyHex;
 });
-ipcMain.handle("identity-regenerate", () => {
-  const filePath = getIdentityFilePath();
-  if (existsSync(filePath)) unlinkSync(filePath);
-  cachedIdentity = null;
-  const newId = generateAndStoreIdentity();
-  return newId.publicKeyHex;
-});
-ipcMain.handle("identity-export", (_event, passphrase) => {
-  const id = loadIdentity();
-  if (!id) return null;
-  const crypto = require("node:crypto");
-  const salt = crypto.randomBytes(16);
-  const iv = crypto.randomBytes(12);
-  const key = crypto.pbkdf2Sync(passphrase, salt, 6e5, 32, "sha256");
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const plaintext = JSON.stringify({ publicKey: id.publicKeyHex, privateKeyPem: id.privateKeyPem, algorithm: id.algorithm });
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
+s.handle("identity-export", (t, e) => {
+  const n = D();
+  if (!n) return null;
+  const r = require("node:crypto"), a = r.randomBytes(16), o = r.randomBytes(12), y = r.pbkdf2Sync(e, a, 6e5, 32, "sha256"), d = r.createCipheriv("aes-256-gcm", y, o), K = JSON.stringify({ publicKey: n.publicKeyHex, privateKeyPem: n.privateKeyPem, algorithm: n.algorithm }), x = Buffer.concat([d.update(K, "utf-8"), d.final()]), E = d.getAuthTag();
   return JSON.stringify({
     version: 2,
-    salt: salt.toString("hex"),
-    iv: iv.toString("hex"),
-    data: Buffer.concat([encrypted, tag]).toString("hex")
+    salt: a.toString("hex"),
+    iv: o.toString("hex"),
+    data: Buffer.concat([x, E]).toString("hex")
   });
 });
-ipcMain.handle("identity-import-encrypted", (_event, fileContents, passphrase) => {
+s.handle("identity-import-encrypted", (t, e, n) => {
   try {
-    const file = JSON.parse(fileContents);
-    if (file.version !== 2) return { success: false, error: "Unsupported identity file version" };
-    const crypto = require("node:crypto");
-    const salt = Buffer.from(file.salt, "hex");
-    const iv = Buffer.from(file.iv, "hex");
-    const raw = Buffer.from(file.data, "hex");
-    const tag = raw.subarray(raw.length - 16);
-    const ciphertext = raw.subarray(0, raw.length - 16);
-    const key = crypto.pbkdf2Sync(passphrase, salt, 6e5, 32, "sha256");
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(tag);
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf-8");
-    const identity = JSON.parse(plaintext);
-    if (!identity.publicKey || !identity.privateKeyPem) return { success: false, error: "Invalid identity file" };
-    if (!safeStorage.isEncryptionAvailable()) return { success: false, error: "Secure storage unavailable" };
-    const encryptedPrivateKey = safeStorage.encryptString(identity.privateKeyPem).toString("base64");
-    const stored = {
-      publicKeyHex: identity.publicKey,
-      encryptedPrivateKey,
-      algorithm: identity.algorithm ?? "Ed25519",
+    const r = JSON.parse(e);
+    if (r.version !== 2) return { success: !1, error: "Unsupported identity file version" };
+    const a = require("node:crypto"), o = Buffer.from(r.salt, "hex"), y = Buffer.from(r.iv, "hex"), d = Buffer.from(r.data, "hex"), K = d.subarray(d.length - 16), x = d.subarray(0, d.length - 16), E = a.pbkdf2Sync(n, o, 6e5, 32, "sha256"), k = a.createDecipheriv("aes-256-gcm", E, y);
+    k.setAuthTag(K);
+    const O = Buffer.concat([k.update(x), k.final()]).toString("utf-8"), p = JSON.parse(O);
+    if (!p.publicKey || !p.privateKeyPem) return { success: !1, error: "Invalid identity file" };
+    if (!l.isEncryptionAvailable()) return { success: !1, error: "Secure storage unavailable" };
+    const F = l.encryptString(p.privateKeyPem).toString("base64"), I = {
+      publicKeyHex: p.publicKey,
+      encryptedPrivateKey: F,
+      algorithm: p.algorithm ?? "Ed25519",
       createdAt: Date.now()
     };
-    writeFileSync(getIdentityFilePath(), JSON.stringify(stored));
-    cachedIdentity = { publicKeyHex: identity.publicKey, privateKeyPem: identity.privateKeyPem, algorithm: identity.algorithm ?? "Ed25519" };
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message ?? "Decryption failed" };
+    return _(w(), JSON.stringify(I)), f = { publicKeyHex: p.publicKey, privateKeyPem: p.privateKeyPem, algorithm: p.algorithm ?? "Ed25519" }, { success: !0 };
+  } catch (r) {
+    return { success: !1, error: r.message ?? "Decryption failed" };
   }
 });
-const pinCache = /* @__PURE__ */ new Map();
-function getPinFilePath(serverId) {
-  const dir = join(app.getPath("userData"), "identity-pins");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const safe = serverId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return join(dir, `${safe}.json`);
+const h = /* @__PURE__ */ new Map();
+function N(t) {
+  const e = u(c.getPath("userData"), "identity-pins");
+  m(e) || U(e, { recursive: !0 });
+  const n = t.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return u(e, `${n}.json`);
 }
-function loadPins(serverId) {
-  const cached = pinCache.get(serverId);
-  if (cached) return cached;
-  const filePath = getPinFilePath(serverId);
-  if (!existsSync(filePath)) {
-    pinCache.set(serverId, {});
-    return {};
-  }
+function R(t) {
+  const e = h.get(t);
+  if (e) return e;
+  const n = N(t);
+  if (!m(n))
+    return h.set(t, {}), {};
   try {
-    const pins = JSON.parse(readFileSync(filePath, "utf-8"));
-    pinCache.set(serverId, pins);
-    return pins;
+    const r = JSON.parse(H(n, "utf-8"));
+    return h.set(t, r), r;
   } catch {
-    pinCache.set(serverId, {});
-    return {};
+    return h.set(t, {}), {};
   }
 }
-function savePins(serverId, pins) {
-  pinCache.set(serverId, pins);
-  writeFileSync(getPinFilePath(serverId), JSON.stringify(pins));
+function J(t, e) {
+  h.set(t, e), _(N(t), JSON.stringify(e));
 }
-ipcMain.handle("identity-pin-check", (_event, serverId, userId, identityPublicKeyHex) => {
-  const pins = loadPins(serverId);
-  const existing = pins[userId];
-  if (!existing) {
-    pins[userId] = identityPublicKeyHex;
-    savePins(serverId, pins);
-    return "new";
-  }
-  if (existing === identityPublicKeyHex) {
-    return "ok";
-  }
-  return "mismatch";
+s.handle("identity-pin-check", (t, e, n, r) => {
+  const a = R(e), o = a[n];
+  return o ? o === r ? "ok" : "mismatch" : (a[n] = r, J(e, a), "new");
 });
-ipcMain.handle("identity-pin-get", (_event, serverId, userId) => {
-  const pins = loadPins(serverId);
-  return pins[userId] ?? null;
+s.handle("identity-pin-get", (t, e, n) => R(e)[n] ?? null);
+s.handle("identity-pin-remove", (t, e, n) => {
+  const r = R(e);
+  delete r[n], J(e, r);
 });
-ipcMain.handle("identity-pin-remove", (_event, serverId, userId) => {
-  const pins = loadPins(serverId);
-  delete pins[userId];
-  savePins(serverId, pins);
-});
-nativeTheme.on("updated", () => {
-  mainWindow == null ? void 0 : mainWindow.webContents.send("theme-changed", nativeTheme.shouldUseDarkColors ? "dark" : "light");
+b.on("updated", () => {
+  i == null || i.webContents.send("theme-changed", b.shouldUseDarkColors ? "dark" : "light");
 });
