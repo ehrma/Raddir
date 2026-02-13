@@ -1,6 +1,7 @@
-import { useSettingsStore } from "../stores/settingsStore";
+import { useSettingsStore, type SavedServer } from "../stores/settingsStore";
 
 const SETTINGS_KEY = "raddir-settings";
+const ENCRYPTED_PREFIX = "enc:";
 
 interface PersistedSettings {
   theme: "dark" | "light" | "system";
@@ -15,10 +16,51 @@ interface PersistedSettings {
   echoCancellation: boolean;
   autoGainControl: boolean;
   outputVolume: number;
-  savedServers: Array<{ id: string; name: string; address: string }>;
+  savedServers: Array<{ id: string; name: string; address: string; password?: string; adminToken?: string; credential?: string }>;
 }
 
-export function loadSettings(): void {
+// ─── Encryption helpers (Electron safeStorage via preload IPC) ──────────────
+
+async function encrypt(value: string | undefined): Promise<string | undefined> {
+  if (!value) return undefined;
+  try {
+    const encrypted = await (window as any).raddir?.encryptString(value);
+    if (encrypted) return ENCRYPTED_PREFIX + encrypted;
+  } catch {}
+  return value; // fallback to plaintext if safeStorage unavailable
+}
+
+async function decrypt(value: string | undefined): Promise<string | undefined> {
+  if (!value) return undefined;
+  if (!value.startsWith(ENCRYPTED_PREFIX)) return value; // already plaintext (legacy)
+  try {
+    const decrypted = await (window as any).raddir?.decryptString(value.slice(ENCRYPTED_PREFIX.length));
+    if (decrypted !== null && decrypted !== undefined) return decrypted;
+  } catch {}
+  return undefined; // decryption failed — credential is lost
+}
+
+async function encryptServer(server: SavedServer): Promise<SavedServer> {
+  return {
+    ...server,
+    password: await encrypt(server.password),
+    adminToken: await encrypt(server.adminToken),
+    credential: await encrypt(server.credential),
+  };
+}
+
+async function decryptServer(server: SavedServer): Promise<SavedServer> {
+  return {
+    ...server,
+    password: await decrypt(server.password),
+    adminToken: await decrypt(server.adminToken),
+    credential: await decrypt(server.credential),
+  };
+}
+
+// ─── Load / Save ────────────────────────────────────────────────────────────
+
+export async function loadSettings(): Promise<void> {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return;
@@ -39,16 +81,18 @@ export function loadSettings(): void {
     if (saved.autoGainControl !== undefined) store.setAutoGainControl(saved.autoGainControl);
     if (saved.outputVolume !== undefined) store.setOutputVolume(saved.outputVolume);
     if (saved.savedServers?.length) {
-      useSettingsStore.setState({ savedServers: saved.savedServers });
+      const decrypted = await Promise.all(saved.savedServers.map(decryptServer));
+      useSettingsStore.setState({ savedServers: decrypted });
     }
   } catch {
     console.warn("[settings] Failed to load persisted settings");
   }
 }
 
-export function saveSettings(): void {
+export async function saveSettings(): Promise<void> {
   try {
     const state = useSettingsStore.getState();
+    const encryptedServers = await Promise.all(state.savedServers.map(encryptServer));
     const data: PersistedSettings = {
       theme: state.theme,
       serverUrl: state.serverUrl,
@@ -62,7 +106,7 @@ export function saveSettings(): void {
       echoCancellation: state.echoCancellation,
       autoGainControl: state.autoGainControl,
       outputVolume: state.outputVolume,
-      savedServers: state.savedServers,
+      savedServers: encryptedServers,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
   } catch {
@@ -70,7 +114,9 @@ export function saveSettings(): void {
   }
 }
 
-// Auto-save on any settings change
+// Auto-save on any settings change (debounced to avoid rapid writes during encryption)
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
 useSettingsStore.subscribe(() => {
-  saveSettings();
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveSettings(), 300);
 });

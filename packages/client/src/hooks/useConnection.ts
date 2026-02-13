@@ -77,6 +77,7 @@ export function useConnection() {
         publicKey: publicKeyHex,
         password: matchedServer?.password || undefined,
         adminToken: matchedServer?.adminToken || undefined,
+        credential: matchedServer?.credential || undefined,
       });
     });
 

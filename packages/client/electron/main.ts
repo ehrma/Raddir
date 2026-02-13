@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync } from "node:fs";
@@ -118,6 +118,21 @@ ipcMain.handle("unregister-ptt-key", () => {
 // IPC: Register the Raddir server host to trust its self-signed certificate
 ipcMain.handle("trust-server-host", (_event, host: string) => {
   trustedServerHost = host || null;
+});
+
+// IPC: Encrypt/decrypt strings using OS-level encryption (Electron safeStorage)
+ipcMain.handle("safe-storage-encrypt", (_event, plaintext: string) => {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  return safeStorage.encryptString(plaintext).toString("base64");
+});
+
+ipcMain.handle("safe-storage-decrypt", (_event, encrypted: string) => {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+  } catch {
+    return null;
+  }
 });
 
 // IPC: Get system theme

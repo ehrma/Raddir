@@ -167,6 +167,23 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_bans_user ON bans(user_id, server_id);
     `,
   },
+  {
+    name: "003_session_credentials",
+    sql: `
+      CREATE TABLE session_credentials (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        user_public_key TEXT NOT NULL,
+        credential TEXT NOT NULL UNIQUE,
+        invite_token_id TEXT REFERENCES invite_tokens(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        revoked_at INTEGER
+      );
+
+      CREATE INDEX idx_session_creds_credential ON session_credentials(credential);
+      CREATE INDEX idx_session_creds_pubkey ON session_credentials(user_public_key, server_id);
+    `,
+  },
 ];
 
 export function closeDb(): void {

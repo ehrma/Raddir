@@ -24,6 +24,7 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Identity export/import** — Backup your identity as a passphrase-encrypted file (PBKDF2 + AES-256-GCM)
 - **ECDH P-256 key exchange** — Per-channel shared secrets derived via HKDF
 - **Built-in TLS** — Server always runs HTTPS/WSS; self-signed cert auto-generated, Let's Encrypt supported
+- **Scoped certificate trust** — Electron only trusts self-signed certs for the specific server you connect to, not globally
 - **No telemetry** — Zero tracking, no analytics, no phone-home
 - **No accounts required** — Connect with just a nickname; identity stays on your device
 
@@ -31,18 +32,21 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Self-hosting first** — Single binary, works fully offline / LAN, no cloud dependency
 - **TLS out of the box** — Self-signed (default), Let's Encrypt (automatic ACME), or custom certificates
 - **Optional server password** — Protect your server with `RADDIR_PASSWORD`; leave empty for open access
-- **Admin token authentication** — Set `RADDIR_ADMIN_TOKEN` and provide it on connect to get admin privileges
+- **Admin token authentication** — Set `RADDIR_ADMIN_TOKEN` and provide it on connect to get admin privileges; all mutating REST API routes require it
+- **Invite system** — Admins generate invite codes that encode the server address into a shareable blob. Recipients paste the code on the connect screen to auto-add the server. The server password is **never** included — instead, a permanent per-user session credential is issued on redemption
+- **Session credentials** — Invited users authenticate with a personal credential tied to their public key, not the server password. Credentials can be revoked server-side
+- **Encrypted credential storage** — Passwords, admin tokens, and session credentials are encrypted at rest using Electron's OS-level `safeStorage` API (DPAPI on Windows, Keychain on macOS, libsecret on Linux). Falls back to plaintext in browser mode
 - **Role-based permissions** — Admin, Member, Guest roles with granular permission control
 - **Channel permission overrides** — Per-channel permission tweaks per role
 - **Effective permissions viewer** — See computed permissions for any user
-- **Admin panel** — Manage channels, users (kick/ban), invite tokens, roles, and overrides
+- **Admin panel** — Manage channels, users (kick/ban), invite codes, roles, and overrides
 - **Ban system** — Ban users by identity; persisted across reconnects
-- **Invite system** — Generate invite tokens via REST API
 
 ### Client
 - **Electron desktop app** — Native window, clean frameless UI
 - **Appearance settings** — Dark, light, or system theme (follows OS preference)
 - **Server browser** — Save multiple servers with name, address, password, and admin token
+- **Paste invite** — Paste an invite code to auto-add a server and receive a session credential
 - **Smart server URLs** — Type `your-server:4000` instead of `wss://your-server:4000/ws`
 - **Channel tree** — Hierarchical channels with inline user avatars and speaking rings
 - **User verification UI** — Click any user to verify via safety number; verified badge in channel tree and user list
@@ -196,7 +200,7 @@ The server **always** runs HTTPS/WSS. Three modes are available:
 | `RADDIR_TLS_CERT` | *(empty)* | Path to PEM cert file (required for `custom`) |
 | `RADDIR_TLS_KEY` | *(empty)* | Path to PEM key file (required for `custom`) |
 
-**Self-signed** (default): Auto-generates an RSA-2048 certificate on first start, valid 10 years, persisted in the data directory. The Electron client accepts self-signed certs automatically.
+**Self-signed** (default): Auto-generates an RSA-2048 certificate on first start, valid 10 years, persisted in the data directory. The Electron client accepts self-signed certs only for the specific server host you connect to (scoped trust, not global).
 
 **Let's Encrypt**: Obtains a free certificate via ACME HTTP-01 challenge. Requires a domain pointing to the server and port 80 open (temporarily, during cert issuance). Certificates auto-renew every 12 hours if expiring within 30 days — hot-swapped without restart.
 

@@ -6,6 +6,7 @@ export interface SavedServer {
   address: string;
   password?: string;
   adminToken?: string;
+  credential?: string;
 }
 
 export interface SettingsState {
@@ -42,6 +43,7 @@ export interface SettingsState {
   updateServer: (id: string, name: string, address: string) => void;
   updateServerPassword: (id: string, password: string | undefined) => void;
   updateServerAdminToken: (id: string, adminToken: string | undefined) => void;
+  updateServerCredential: (id: string, credential: string | undefined) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -87,5 +89,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   })),
   updateServerAdminToken: (id: string, adminToken: string | undefined) => set((s) => ({
     savedServers: s.savedServers.map((srv) => srv.id === id ? { ...srv, adminToken } : srv),
+  })),
+  updateServerCredential: (id: string, credential: string | undefined) => set((s) => ({
+    savedServers: s.savedServers.map((srv) => srv.id === id ? { ...srv, credential } : srv),
   })),
 }));

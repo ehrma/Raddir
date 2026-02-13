@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useSettingsStore, type SavedServer } from "../stores/settingsStore";
 import { useServerStore } from "../stores/serverStore";
-import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, LockOpen } from "lucide-react";
+import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, LockOpen, Ticket } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useConnection } from "../hooks/useConnection";
 import { SettingsPanel } from "./Settings/SettingsPanel";
+import { getOrCreateIdentity } from "../lib/e2ee/identity";
+import { normalizeServerUrl } from "../lib/normalize-url";
 import logoImg from "../assets/raddir-shield-logo.png";
 
 export function ConnectScreen() {
@@ -21,6 +23,10 @@ export function ConnectScreen() {
   const [editPassword, setEditPassword] = useState("");
   const [editingAdminToken, setEditingAdminToken] = useState(false);
   const [editAdminToken, setEditAdminToken] = useState("");
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [redeeming, setRedeeming] = useState(false);
 
   const selectedServer = savedServers.find((s) => s.id === selectedId) ?? null;
 
@@ -38,6 +44,112 @@ export function ConnectScreen() {
     setNewPassword("");
     setNewAdminToken("");
     setShowAddForm(false);
+  };
+
+  const redeemInvite = async () => {
+    const code = inviteCode.trim();
+    if (!code) return;
+    setInviteError(null);
+    setRedeeming(true);
+
+    try {
+      // Decode the invite blob client-side (base64url → JSON)
+      let decoded: { v: number; a: string; t: string };
+      try {
+        // base64url → standard base64: replace URL-safe chars and add padding
+        let b64 = code.replace(/-/g, "+").replace(/_/g, "/");
+        while (b64.length % 4 !== 0) b64 += "=";
+        const json = atob(b64);
+        decoded = JSON.parse(json);
+        if (decoded.v !== 1 || !decoded.a || !decoded.t) throw new Error();
+      } catch (e) {
+        console.error("[invite] Failed to decode invite blob:", e);
+        setInviteError("Invalid invite code");
+        setRedeeming(false);
+        return;
+      }
+
+      const serverAddress = decoded.a;
+      console.log("[invite] Decoded invite blob:", { address: serverAddress, token: decoded.t });
+
+      // Trust the server host for self-signed certs
+      try {
+        const wsUrl = normalizeServerUrl(serverAddress);
+        const serverHost = new URL(wsUrl.replace(/^ws/, "http")).host;
+        (window as any).raddir?.trustServerHost(serverHost);
+        console.log("[invite] Trusted server host:", serverHost);
+      } catch (e) {
+        console.warn("[invite] Failed to trust server host:", e);
+      }
+
+      // Derive HTTPS base URL from the address
+      let apiHost = serverAddress.replace(/^(wss?|https?):\/\//, "").replace(/\/ws\/?$/, "");
+      if (!apiHost.includes(":")) apiHost += ":4000";
+      const apiBase = "https://" + apiHost;
+      console.log("[invite] API base:", apiBase);
+
+      // Get or create identity for the public key
+      let publicKey: string;
+      try {
+        const identity = await getOrCreateIdentity();
+        publicKey = identity.publicKeyHex;
+        console.log("[invite] Public key ready");
+      } catch (e) {
+        console.error("[invite] Failed to generate identity key:", e);
+        setInviteError("Failed to generate identity key");
+        setRedeeming(false);
+        return;
+      }
+
+      // Call the redeem endpoint
+      console.log("[invite] Calling redeem endpoint...");
+      const res = await fetch(`${apiBase}/api/invites/redeem`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inviteBlob: code, publicKey }),
+      });
+
+      const data = await res.json();
+      console.log("[invite] Redeem response:", res.status, data);
+      if (!res.ok) {
+        setInviteError(data.error || "Failed to redeem invite");
+        setRedeeming(false);
+        return;
+      }
+
+      // Check if server already exists
+      const existing = savedServers.find((s) => s.address === serverAddress);
+      if (existing) {
+        // Update credential on existing server
+        useSettingsStore.getState().updateServerCredential(existing.id, data.credential);
+        setSelectedId(existing.id);
+        setInviteError(null);
+        setInviteCode("");
+        setShowInviteForm(false);
+        setRedeeming(false);
+        console.log("[invite] Credential updated for existing server:", existing.name);
+        return;
+      } else {
+        // Auto-add the server using the store's addServer action
+        addServer(serverAddress, serverAddress, undefined, undefined);
+        // Find the newly added server and set its credential
+        const added = useSettingsStore.getState().savedServers.find(
+          (s) => s.address === serverAddress
+        );
+        if (added) {
+          useSettingsStore.getState().updateServerCredential(added.id, data.credential);
+          setSelectedId(added.id);
+        }
+      }
+
+      console.log("[invite] Server added successfully");
+      setInviteCode("");
+      setShowInviteForm(false);
+    } catch (err: any) {
+      console.error("[invite] Redeem failed:", err);
+      setInviteError(err.message || "Failed to redeem invite");
+    }
+    setRedeeming(false);
   };
 
   return (
@@ -84,19 +196,17 @@ export function ConnectScreen() {
                 >
                   <Wifi className="w-3 h-3" />
                 </button>
-                {savedServers.length > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeServer(server.id);
-                      if (selectedId === server.id) setSelectedId(savedServers.find(s => s.id !== server.id)?.id ?? null);
-                    }}
-                    className="p-1 rounded text-surface-500 hover:text-red-400 hover:bg-surface-700 transition-all"
-                    title="Remove"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeServer(server.id);
+                    if (selectedId === server.id) setSelectedId(savedServers.find(s => s.id !== server.id)?.id ?? null);
+                  }}
+                  className="p-1 rounded text-surface-500 hover:text-red-400 hover:bg-surface-700 transition-all"
+                  title="Remove"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
               </div>
             </div>
           ))}
@@ -140,17 +250,25 @@ export function ConnectScreen() {
             </div>
           ) : (
             <button
-              onClick={() => setShowAddForm(true)}
+              onClick={() => { setShowAddForm(true); setShowInviteForm(false); }}
               className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-surface-500 hover:text-surface-300 hover:bg-surface-800 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               Add Server
             </button>
           )}
+
         </div>
 
-        {/* Bottom bar — settings */}
-        <div className="p-2 border-t border-surface-800">
+        {/* Bottom bar — invite + settings */}
+        <div className="p-2 border-t border-surface-800 space-y-1">
+          <button
+            onClick={() => { setShowInviteForm(true); setShowAddForm(false); }}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-surface-400 hover:text-surface-200 hover:bg-surface-800 transition-colors"
+          >
+            <Ticket className="w-3.5 h-3.5" />
+            Paste Invite
+          </button>
           <button
             onClick={() => setShowSettings(true)}
             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-surface-400 hover:text-surface-200 hover:bg-surface-800 transition-colors"
@@ -315,6 +433,46 @@ export function ConnectScreen() {
       </div>
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+
+      {/* Invite code overlay */}
+      {showInviteForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md mx-4 bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl p-6 space-y-4">
+            <div className="text-center space-y-1">
+              <Ticket className="w-8 h-8 text-accent mx-auto" />
+              <h2 className="text-lg font-semibold text-surface-100">Paste Invite Code</h2>
+              <p className="text-xs text-surface-500">Paste an invite code to join a server. No password needed.</p>
+            </div>
+
+            <textarea
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              placeholder="Paste invite code here..."
+              rows={3}
+              autoFocus
+              className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-surface-100 text-xs font-mono placeholder:text-surface-500 focus:outline-none focus:border-accent resize-none"
+            />
+
+            {inviteError && <p className="text-xs text-red-400 text-center">{inviteError}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={redeemInvite}
+                disabled={!inviteCode.trim() || redeeming}
+                className="flex-1 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+              >
+                {redeeming ? "Joining..." : "Join Server"}
+              </button>
+              <button
+                onClick={() => { setShowInviteForm(false); setInviteCode(""); setInviteError(null); }}
+                className="px-4 py-2 rounded-lg text-sm text-surface-400 hover:bg-surface-800 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

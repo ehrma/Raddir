@@ -16,7 +16,7 @@ export function App() {
 
   // Load persisted settings on mount
   useEffect(() => {
-    loadSettings();
+    loadSettings().catch(() => {});
   }, []);
 
   // Theme management

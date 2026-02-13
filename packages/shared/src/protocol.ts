@@ -10,6 +10,7 @@ export interface ClientAuthMessage {
   publicKey?: string;
   password?: string;
   adminToken?: string;
+  credential?: string;
 }
 
 export interface ClientJoinServerMessage {

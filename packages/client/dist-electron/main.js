@@ -1,4 +1,4 @@
-import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
+import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, safeStorage, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync } from "node:fs";
@@ -93,6 +93,18 @@ ipcMain.handle("unregister-ptt-key", () => {
 });
 ipcMain.handle("trust-server-host", (_event, host) => {
   trustedServerHost = host || null;
+});
+ipcMain.handle("safe-storage-encrypt", (_event, plaintext) => {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  return safeStorage.encryptString(plaintext).toString("base64");
+});
+ipcMain.handle("safe-storage-decrypt", (_event, encrypted) => {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+  } catch {
+    return null;
+  }
 });
 ipcMain.handle("get-theme", () => {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../stores/serverStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { getSignalingClient } from "../hooks/useConnection";
 import { usePermissions } from "../hooks/usePermissions";
 import { getApiBase, getAuthHeaders } from "../lib/api-base";
@@ -233,7 +234,7 @@ function UserAdmin() {
 
 function InviteAdmin() {
   const { serverId, userId } = useServerStore();
-  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [inviteBlob, setInviteBlob] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -241,14 +242,20 @@ function InviteAdmin() {
     if (!serverId || !userId) return;
     setCreating(true);
     try {
+      const { serverUrl } = useSettingsStore.getState();
+      // Strip protocol and /ws path to get the raw address
+      const serverAddress = serverUrl
+        .replace(/^(wss?|https?):\/\//, "")
+        .replace(/\/ws\/?$/, "");
+
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}/invites`, {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ createdBy: userId, maxUses: 10, expiresInHours: 24 }),
+        body: JSON.stringify({ createdBy: userId, maxUses: 10, expiresInHours: 24, serverAddress }),
       });
       if (res.ok) {
         const data = await res.json();
-        setInviteToken(data.token);
+        setInviteBlob(data.inviteBlob);
       }
     } catch (err) {
       console.error("[admin] Failed to create invite:", err);
@@ -257,8 +264,8 @@ function InviteAdmin() {
   };
 
   const handleCopy = () => {
-    if (inviteToken) {
-      navigator.clipboard.writeText(inviteToken);
+    if (inviteBlob) {
+      navigator.clipboard.writeText(inviteBlob);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -272,19 +279,19 @@ function InviteAdmin() {
         className="px-4 py-2 bg-accent text-white text-xs rounded-lg hover:bg-accent-hover disabled:opacity-50 transition-colors flex items-center gap-1.5"
       >
         <Plus className="w-3.5 h-3.5" />
-        {creating ? "Creating..." : "Generate Invite Token"}
+        {creating ? "Creating..." : "Generate Invite Link"}
       </button>
 
-      {inviteToken && (
+      {inviteBlob && (
         <div className="p-3 bg-surface-800/50 rounded-lg border border-surface-700">
-          <p className="text-xs text-surface-400 mb-2">Invite Token (expires in 24h, max 10 uses):</p>
+          <p className="text-xs text-surface-400 mb-2">Invite code (expires in 24h, max 10 uses):</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-sm font-mono text-accent bg-surface-800 px-3 py-1.5 rounded">
-              {inviteToken}
+            <code className="flex-1 text-[10px] font-mono text-accent bg-surface-800 px-3 py-1.5 rounded break-all select-all">
+              {inviteBlob}
             </code>
             <button
               onClick={handleCopy}
-              className="px-3 py-1.5 text-xs bg-surface-700 rounded text-surface-300 hover:text-surface-100 transition-colors"
+              className="px-3 py-1.5 text-xs bg-surface-700 rounded text-surface-300 hover:text-surface-100 transition-colors flex-shrink-0"
             >
               {copied ? "Copied!" : "Copy"}
             </button>
@@ -293,8 +300,8 @@ function InviteAdmin() {
       )}
 
       <p className="text-[10px] text-surface-500">
-        Share the invite token with users who want to join this server.
-        Tokens can be single-use or multi-use with optional expiry.
+        Share this invite code with users who want to join. They can paste it on the connect screen to auto-add this server.
+        The server password is never included — the code grants a personal credential instead.
       </p>
     </div>
   );

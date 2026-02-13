@@ -16,6 +16,7 @@ import { createUser, getUserByPublicKey, addServerMember, assignRole, unassignRo
 import { getRolesByServer, getDefaultRole, ensureDefaultRoles } from "../models/permission.js";
 import { computeEffectivePermissions, hasPermission } from "../permissions/engine.js";
 import { createBan, isUserBanned } from "../models/ban.js";
+import { getDb } from "../db/database.js";
 import { getOrCreateRouter, getRouterRtpCapabilities } from "../media/router.js";
 import {
   createWebRtcTransport,
@@ -113,11 +114,31 @@ async function handleAuth(
   ws: WebSocket,
   msg: Extract<ClientMessage, { type: "auth" }>
 ): Promise<ConnectedClient> {
-  // Check server password if configured
-  if (serverConfig.password && msg.password !== serverConfig.password) {
-    send(ws, { type: "auth-result", success: false, error: "Invalid server password" });
-    ws.close();
-    return { ws, userId: "", nickname: "", serverId: null, channelId: null, isMuted: false, isDeafened: false } as ConnectedClient;
+  // Check server password or session credential
+  if (serverConfig.password) {
+    let authenticated = false;
+
+    // Option 1: Direct server password
+    if (msg.password === serverConfig.password) {
+      authenticated = true;
+    }
+
+    // Option 2: Session credential (from invite redemption)
+    if (!authenticated && msg.credential && msg.publicKey) {
+      const db = getDb();
+      const cred = db.prepare(
+        "SELECT id FROM session_credentials WHERE credential = ? AND user_public_key = ? AND revoked_at IS NULL"
+      ).get(msg.credential, msg.publicKey) as any;
+      if (cred) {
+        authenticated = true;
+      }
+    }
+
+    if (!authenticated) {
+      send(ws, { type: "auth-result", success: false, error: "Invalid server password or credential" });
+      ws.close();
+      return { ws, userId: "", nickname: "", serverId: null, channelId: null, isMuted: false, isDeafened: false } as ConnectedClient;
+    }
   }
 
   let user = msg.publicKey ? getUserByPublicKey(msg.publicKey) : undefined;
