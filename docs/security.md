@@ -92,6 +92,44 @@ Raddir uses **two layers** of encryption for voice and text:
 
 No third-party crypto libraries are used. All operations run in the browser's native Web Crypto API, which leverages hardware acceleration (AES-NI on x86, ARMv8 crypto extensions).
 
+## Server-Side Security Measures
+
+Beyond E2EE, the server implements several hardening measures:
+
+### Rate Limiting
+
+- **WebSocket auth**: 10 attempts per 60 seconds per IP — prevents brute-force password/credential attacks
+- **Public invite endpoints**: 20 requests per 60 seconds per IP — prevents invite enumeration and DoS
+- Rate limiting uses `req.socket.remoteAddress` by default. Set `RADDIR_TRUST_PROXY=true` **only** when behind a reverse proxy that sets `X-Forwarded-For`
+
+### CORS
+
+Origins are restricted to Electron (`null`, `file://`, `app://`) and `localhost` dev servers. All other origins are rejected.
+
+### Admin Privileges
+
+Admin token grants **ephemeral** privileges for the WebSocket session only — not persisted as a database role. When the session ends, admin access is gone. This limits the impact of a leaked token.
+
+### Invite System Hardening
+
+- Invite blobs contain the server address as a **routing hint** only — the server returns its canonical address from the database, never trusting the blob
+- Each redeem **revokes** previous credentials for the same public key on that server and mints a fresh one
+- Invite use counts are enforced with an **atomic** SQL UPDATE to prevent race conditions exceeding `maxUses`
+- `createdBy` metadata is set server-side, not accepted from the request body
+
+### E2EE Relay Isolation
+
+Targeted E2EE relay messages (key exchange, verification) require `target.serverId === sender.serverId`. This prevents cross-server spam via the relay mechanism.
+
+### WebSocket Limits
+
+- **Max message size**: 64 KB — oversized messages are rejected and the connection is closed
+- **Chat relay**: server uses the sender's tracked `channelId`, ignoring any `channelId` in the message — prevents cross-channel injection
+
+### Identity Uniqueness
+
+A partial UNIQUE index on `users.public_key` (where not NULL) prevents duplicate identity rows that could break key exchange or impersonation.
+
 ## What Raddir Does NOT Do
 
 - **No telemetry**: The server sends no data to any external service

@@ -24,6 +24,7 @@ export interface RaddirConfig {
   tlsDomain: string;
   tlsEmail: string;
   openAdmin: boolean;
+  trustProxy: boolean;
 }
 
 function loadConfigFile(): Partial<RaddirConfig> {
@@ -60,5 +61,6 @@ export function loadConfig(): RaddirConfig {
     tlsDomain: process.env.RADDIR_TLS_DOMAIN ?? file.tlsDomain ?? "",
     tlsEmail: process.env.RADDIR_TLS_EMAIL ?? file.tlsEmail ?? "",
     openAdmin: (process.env.RADDIR_OPEN_ADMIN ?? "").toLowerCase() === "true" || (file.openAdmin ?? false),
+    trustProxy: (process.env.RADDIR_TRUST_PROXY ?? "").toLowerCase() === "true" || (file.trustProxy ?? false),
   };
 }

@@ -32,10 +32,12 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Self-hosting first** — Single binary, works fully offline / LAN, no cloud dependency
 - **TLS out of the box** — Self-signed (default), Let's Encrypt (automatic ACME), or custom certificates
 - **Optional server password** — Protect your server with `RADDIR_PASSWORD`; leave empty for open access
-- **Admin token authentication** — Set `RADDIR_ADMIN_TOKEN` and provide it on connect to get admin privileges; all mutating REST API routes require it
-- **Invite system** — Admins generate invite codes that encode the server address into a shareable blob. Recipients paste the code on the connect screen to auto-add the server. The server password is **never** included — instead, a permanent per-user session credential is issued on redemption
+- **Admin token authentication** — Set `RADDIR_ADMIN_TOKEN` and provide it on connect to get ephemeral admin privileges for that session (not persisted to DB); all mutating REST API routes require it
+- **Invite system** — Admins generate invite codes that encode the server address into a shareable blob. Recipients paste the code on the connect screen to auto-add the server. The server password is **never** included — instead, a per-user session credential is issued on redemption (old credentials are revoked)
 - **Session credentials** — Invited users authenticate with a personal credential tied to their public key, not the server password. Credentials can be revoked server-side
 - **Encrypted credential storage** — Passwords, admin tokens, and session credentials are encrypted at rest using Electron's OS-level `safeStorage` API (DPAPI on Windows, Keychain on macOS, libsecret on Linux). Falls back to plaintext in browser mode
+- **Rate limiting** — IP-based sliding-window rate limiting on WebSocket auth and public invite endpoints
+- **CORS policy** — Restricted to Electron (`file://`, `app://`) and localhost dev origins
 - **Role-based permissions** — Admin, Member, Guest roles with granular permission control
 - **Channel permission overrides** — Per-channel permission tweaks per role
 - **Effective permissions viewer** — See computed permissions for any user
@@ -135,6 +137,7 @@ services:
       - RADDIR_ANNOUNCED_IP=       # Set to your server's public IP
       - RADDIR_ADMIN_TOKEN=        # Optional
       - RADDIR_PASSWORD=           # Optional
+      - RADDIR_TRUST_PROXY=false   # Set true only behind a reverse proxy
       - RADDIR_TLS_MODE=selfsigned
       - RADDIR_LOG_LEVEL=info
     volumes:
@@ -186,7 +189,9 @@ Configuration is loaded in order: **environment variables** → **config file** 
 | Variable | Default | Description |
 |---|---|---|
 | `RADDIR_PASSWORD` | *(empty)* | Server password (leave empty for open access) |
-| `RADDIR_ADMIN_TOKEN` | *(empty)* | Admin authentication token |
+| `RADDIR_ADMIN_TOKEN` | *(empty)* | Admin authentication token — grants ephemeral admin privileges for the session (not persisted) |
+| `RADDIR_OPEN_ADMIN` | `false` | Allow admin API without a token (not recommended for public servers) |
+| `RADDIR_TRUST_PROXY` | `false` | Trust `X-Forwarded-For` header for rate limiting. **Only enable if behind a reverse proxy** |
 
 ### TLS
 

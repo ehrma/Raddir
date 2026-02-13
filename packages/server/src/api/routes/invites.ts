@@ -2,6 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { nanoid } from "nanoid";
 import { getDb } from "../../db/database.js";
 import { requireAdmin } from "../auth.js";
+import { RateLimiter } from "../../lib/rate-limiter.js";
+
+// 20 requests per 60 seconds per IP for public invite endpoints
+const inviteLimiter = new RateLimiter(20, 60_000);
+inviteLimiter.startCleanup();
 
 /**
  * Encode an invite blob: base64url-encoded JSON with server address and token.
@@ -33,18 +38,21 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
   // Create an invite token (admin only)
   fastify.post<{
     Params: { serverId: string };
-    Body: { maxUses?: number; expiresInHours?: number; createdBy: string; serverAddress: string };
+    Body: { maxUses?: number; expiresInHours?: number; serverAddress: string };
   }>(
     "/api/servers/:serverId/invites",
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { serverId } = request.params;
-      const { maxUses, expiresInHours, createdBy, serverAddress } = request.body;
+      const { maxUses, expiresInHours, serverAddress } = request.body;
 
       if (!serverAddress) {
         reply.status(400);
         return { error: "serverAddress is required" };
       }
+
+      // createdBy is set server-side — never trust the client for audit metadata
+      const createdBy = "admin";
 
       const id = nanoid();
       const token = nanoid(12);
@@ -69,6 +77,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Params: { token: string } }>(
     "/api/invites/:token",
     async (request, reply) => {
+      const ip = request.ip;
+      if (!inviteLimiter.check(ip)) {
+        reply.status(429);
+        return { error: "Too many requests. Try again later." };
+      }
       const { token } = request.params;
       const db = getDb();
       const row = db.prepare("SELECT * FROM invite_tokens WHERE token = ?").get(token) as any;
@@ -107,6 +120,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
   }>(
     "/api/invites/redeem",
     async (request, reply) => {
+      const ip = request.ip;
+      if (!inviteLimiter.check(ip)) {
+        reply.status(429);
+        return { error: "Too many requests. Try again later." };
+      }
       const { inviteBlob, publicKey } = request.body;
 
       if (!inviteBlob || !publicKey) {
@@ -134,19 +152,6 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "Invite expired" };
       }
 
-      // Check if this public key already has a credential for this server
-      const existing = db.prepare(
-        "SELECT credential FROM session_credentials WHERE user_public_key = ? AND server_id = ? AND revoked_at IS NULL"
-      ).get(publicKey, row.server_id) as any;
-
-      if (existing) {
-        return {
-          credential: existing.credential,
-          serverAddress: row.server_address || "",
-          serverId: row.server_id,
-        };
-      }
-
       // Atomic increment: only succeeds if uses < max_uses (or no limit)
       const result = db.prepare(`
         UPDATE invite_tokens SET uses = uses + 1
@@ -160,7 +165,12 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
         return { error: "Invite has reached max uses or expired" };
       }
 
-      // Create a permanent session credential
+      // Revoke any existing credentials for this pubkey on this server
+      db.prepare(
+        "UPDATE session_credentials SET revoked_at = ? WHERE user_public_key = ? AND server_id = ? AND revoked_at IS NULL"
+      ).run(now, publicKey, row.server_id);
+
+      // Create a fresh session credential
       const credentialId = nanoid();
       const credential = nanoid(32);
 
@@ -181,6 +191,11 @@ export async function inviteRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<{ Body: { inviteBlob: string } }>(
     "/api/invites/decode",
     async (request, reply) => {
+      const ip = request.ip;
+      if (!inviteLimiter.check(ip)) {
+        reply.status(429);
+        return { error: "Too many requests. Try again later." };
+      }
       const { inviteBlob } = request.body;
       if (!inviteBlob) {
         reply.status(400);

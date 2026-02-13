@@ -118,12 +118,62 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
     }
 }
 ```
 
 > **Note**: The reverse proxy only handles HTTP/WebSocket (signaling). WebRTC UDP traffic goes directly to the server — it cannot be proxied through nginx.
+
+> **Important**: When behind a reverse proxy, set `RADDIR_TRUST_PROXY=true` so that rate limiting uses the client's real IP from the `X-Forwarded-For` header instead of the proxy's IP. **Never enable this if the server is directly reachable** — attackers can spoof the header to bypass rate limits.
+
+## Security Hardening
+
+### Rate Limiting
+
+The server applies IP-based sliding-window rate limiting to:
+
+- **WebSocket auth**: 10 attempts per 60 seconds per IP
+- **Public invite endpoints** (validate, redeem, decode): 20 requests per 60 seconds per IP
+
+Rate-limited requests receive a `429 Too Many Requests` (HTTP) or an auth failure with a descriptive message (WebSocket).
+
+### CORS Policy
+
+The server restricts CORS to:
+
+- `null` / `file://` / `app://` origins (Electron)
+- `http://localhost` / `https://localhost` (development)
+
+All other origins are rejected. This prevents browser-based CSRF attacks against the API.
+
+### Admin Token
+
+The `RADDIR_ADMIN_TOKEN` grants **ephemeral** admin privileges for the duration of a WebSocket session. It is **not** persisted as a database role — when the session disconnects, admin privileges are gone. This limits the blast radius of a leaked token.
+
+- All mutating REST API routes (`/api/servers/:id/invites`, etc.) require the admin token in the `Authorization: Bearer <token>` header.
+- If no token is set and `RADDIR_OPEN_ADMIN=false` (default), the admin API is locked.
+- If no token is set and `RADDIR_OPEN_ADMIN=true`, the admin API is open to all (only for development/testing).
+
+### Invite System
+
+- Invite blobs contain the server address (routing hint) and a random token
+- The server stores the canonical address in its database — the blob address is **not trusted** for authorization
+- Each redeem mints a fresh session credential and **revokes** any previous credential for that public key on that server
+- Invite uses are enforced atomically to prevent race conditions exceeding `maxUses`
+
+### Proxy Trust (`RADDIR_TRUST_PROXY`)
+
+| Value | Behavior |
+|---|---|
+| `false` (default) | Rate limiting uses `req.socket.remoteAddress` (direct TCP connection IP) |
+| `true` | Rate limiting uses the first IP from `X-Forwarded-For` header |
+
+**Only set to `true` if the server is behind a trusted reverse proxy** (nginx, Caddy, etc.) that overwrites `X-Forwarded-For`. If the server is directly reachable, an attacker can forge this header to bypass rate limits.
+
+### WebSocket Message Limits
+
+The WebSocket server enforces a **64 KB** maximum message size (`maxPayload`). Messages exceeding this limit are rejected and the connection is closed. This prevents memory exhaustion from oversized payloads.
 
 ## System Requirements
 

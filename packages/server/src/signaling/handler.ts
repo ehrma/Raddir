@@ -89,7 +89,9 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let client: ConnectedClient | null = null;
-    const remoteIp = req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()
+    const remoteIp = (serverConfig.trustProxy
+        ? req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()
+        : undefined)
       || req.socket.remoteAddress
       || "unknown";
 
@@ -358,21 +360,21 @@ async function handleMessage(client: ConnectedClient, msg: ClientMessage): Promi
   }
 }
 
-async function handleJoinChannel(client: ConnectedClient, channelId: string): Promise<void> {
+async function handleJoinChannel(client: ConnectedClient, channelId: string): Promise<boolean> {
   if (!client.serverId) {
     send(client.ws, { type: "error", code: "NOT_IN_SERVER", message: "Join a server first" });
-    return;
+    return false;
   }
 
   const channel = getChannel(channelId);
   if (!channel || channel.serverId !== client.serverId) {
     send(client.ws, { type: "error", code: "CHANNEL_NOT_FOUND", message: "Channel not found" });
-    return;
+    return false;
   }
 
   if (!clientHasPermission(client, "join", channelId)) {
     send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to join this channel" });
-    return;
+    return false;
   }
 
   // Check max users
@@ -380,7 +382,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
     const currentUsers = getChannelClients(channelId).length;
     if (currentUsers >= channel.maxUsers) {
       send(client.ws, { type: "error", code: "CHANNEL_FULL", message: "Channel is full" });
-      return;
+      return false;
     }
   }
 
@@ -447,6 +449,8 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
     userId: client.userId,
     updates: { channelId },
   }, client.userId);
+
+  return true;
 }
 
 async function handleLeaveChannel(client: ConnectedClient): Promise<void> {
@@ -578,17 +582,24 @@ function handleE2EE(
   client: ConnectedClient,
   msg: Extract<ClientMessage, { type: "e2ee" }>
 ): void {
+  if (!client.serverId) return;
+
   // Server relays E2EE key exchange messages as opaque blobs
   // It does NOT inspect or store the payload
   const payload = msg.payload;
 
+  /** Send to a targeted user, but only if they share the same server. */
+  function sendToTarget(targetUserId: string): void {
+    const target = clients.get(targetUserId);
+    if (target && target.serverId === client.serverId) {
+      send(target.ws, { type: "e2ee", fromUserId: client.userId, payload });
+    }
+  }
+
   if (payload.kind === "public-key-announce") {
     // Broadcast to channel or targeted user
     if (payload.targetUserId) {
-      const target = clients.get(payload.targetUserId);
-      if (target) {
-        send(target.ws, { type: "e2ee", fromUserId: client.userId, payload });
-      }
+      sendToTarget(payload.targetUserId);
     } else if (client.channelId) {
       broadcast(getChannelClients(client.channelId), {
         type: "e2ee",
@@ -597,10 +608,7 @@ function handleE2EE(
       }, client.userId);
     }
   } else if (payload.kind === "encrypted-channel-key") {
-    const target = clients.get(payload.targetUserId);
-    if (target) {
-      send(target.ws, { type: "e2ee", fromUserId: client.userId, payload });
-    }
+    sendToTarget(payload.targetUserId);
   } else if (payload.kind === "key-ratchet") {
     if (client.channelId) {
       broadcast(getChannelClients(client.channelId), {
@@ -610,10 +618,7 @@ function handleE2EE(
       }, client.userId);
     }
   } else if (payload.kind === "verification-request" || payload.kind === "verification-confirm") {
-    const target = clients.get(payload.targetUserId);
-    if (target) {
-      send(target.ws, { type: "e2ee", fromUserId: client.userId, payload });
-    }
+    sendToTarget(payload.targetUserId);
   }
 }
 
@@ -657,8 +662,9 @@ async function handleMoveUser(
   const target = clients.get(msg.userId);
   if (!target || target.serverId !== client.serverId) return;
 
-  // Force the target to join the new channel — await so broadcast happens after join completes
-  await handleJoinChannel(target, msg.channelId);
+  // Force the target to join the new channel — only broadcast on success
+  const joined = await handleJoinChannel(target, msg.channelId);
+  if (!joined) return;
 
   broadcast(getServerClients(client.serverId), {
     type: "user-moved",
