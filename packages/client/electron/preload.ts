@@ -13,6 +13,13 @@ contextBridge.exposeInMainWorld("raddir", {
   identityExport: (passphrase: string) => ipcRenderer.invoke("identity-export", passphrase),
   identityImportEncrypted: (fileContents: string, passphrase: string) =>
     ipcRenderer.invoke("identity-import-encrypted", fileContents, passphrase),
+  // TOFU identity pin store
+  identityPinCheck: (serverId: string, userId: string, identityPublicKeyHex: string) =>
+    ipcRenderer.invoke("identity-pin-check", serverId, userId, identityPublicKeyHex) as Promise<"new" | "ok" | "mismatch">,
+  identityPinGet: (serverId: string, userId: string) =>
+    ipcRenderer.invoke("identity-pin-get", serverId, userId) as Promise<string | null>,
+  identityPinRemove: (serverId: string, userId: string) =>
+    ipcRenderer.invoke("identity-pin-remove", serverId, userId) as Promise<void>,
   onPttPressed: (callback: () => void) => {
     ipcRenderer.on("ptt-pressed", callback);
     return () => ipcRenderer.removeListener("ptt-pressed", callback);

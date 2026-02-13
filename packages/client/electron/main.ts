@@ -269,6 +269,74 @@ ipcMain.handle("identity-import-encrypted", (_event, fileContents: string, passp
   }
 });
 
+// ─── TOFU Identity Pin Store ─────────────────────────────────────────────────
+// Persists peerUserId -> identityPublicKey per serverId.
+// On first contact: pin the key ("new"). On match: "ok". On mismatch: "mismatch" (hard reject).
+
+type PinStore = Record<string, string>; // userId -> identityPublicKeyHex
+const pinCache = new Map<string, PinStore>();
+
+function getPinFilePath(serverId: string): string {
+  const dir = join(app.getPath("userData"), "identity-pins");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // Sanitize serverId for filesystem safety
+  const safe = serverId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return join(dir, `${safe}.json`);
+}
+
+function loadPins(serverId: string): PinStore {
+  const cached = pinCache.get(serverId);
+  if (cached) return cached;
+  const filePath = getPinFilePath(serverId);
+  if (!existsSync(filePath)) {
+    pinCache.set(serverId, {});
+    return {};
+  }
+  try {
+    const pins = JSON.parse(readFileSync(filePath, "utf-8")) as PinStore;
+    pinCache.set(serverId, pins);
+    return pins;
+  } catch {
+    pinCache.set(serverId, {});
+    return {};
+  }
+}
+
+function savePins(serverId: string, pins: PinStore): void {
+  pinCache.set(serverId, pins);
+  writeFileSync(getPinFilePath(serverId), JSON.stringify(pins));
+}
+
+/**
+ * Check a peer's identity key against the TOFU pin store.
+ * Returns: "new" (first contact, now pinned), "ok" (matches), "mismatch" (key changed — reject)
+ */
+ipcMain.handle("identity-pin-check", (_event, serverId: string, userId: string, identityPublicKeyHex: string): "new" | "ok" | "mismatch" => {
+  const pins = loadPins(serverId);
+  const existing = pins[userId];
+  if (!existing) {
+    // TOFU: first contact — pin this key
+    pins[userId] = identityPublicKeyHex;
+    savePins(serverId, pins);
+    return "new";
+  }
+  if (existing === identityPublicKeyHex) {
+    return "ok";
+  }
+  return "mismatch";
+});
+
+ipcMain.handle("identity-pin-get", (_event, serverId: string, userId: string): string | null => {
+  const pins = loadPins(serverId);
+  return pins[userId] ?? null;
+});
+
+ipcMain.handle("identity-pin-remove", (_event, serverId: string, userId: string): void => {
+  const pins = loadPins(serverId);
+  delete pins[userId];
+  savePins(serverId, pins);
+});
+
 nativeTheme.on("updated", () => {
   mainWindow?.webContents.send("theme-changed", nativeTheme.shouldUseDarkColors ? "dark" : "light");
 });

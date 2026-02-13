@@ -213,6 +213,56 @@ ipcMain.handle("identity-import-encrypted", (_event, fileContents, passphrase) =
     return { success: false, error: err.message ?? "Decryption failed" };
   }
 });
+const pinCache = /* @__PURE__ */ new Map();
+function getPinFilePath(serverId) {
+  const dir = join(app.getPath("userData"), "identity-pins");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const safe = serverId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return join(dir, `${safe}.json`);
+}
+function loadPins(serverId) {
+  const cached = pinCache.get(serverId);
+  if (cached) return cached;
+  const filePath = getPinFilePath(serverId);
+  if (!existsSync(filePath)) {
+    pinCache.set(serverId, {});
+    return {};
+  }
+  try {
+    const pins = JSON.parse(readFileSync(filePath, "utf-8"));
+    pinCache.set(serverId, pins);
+    return pins;
+  } catch {
+    pinCache.set(serverId, {});
+    return {};
+  }
+}
+function savePins(serverId, pins) {
+  pinCache.set(serverId, pins);
+  writeFileSync(getPinFilePath(serverId), JSON.stringify(pins));
+}
+ipcMain.handle("identity-pin-check", (_event, serverId, userId, identityPublicKeyHex) => {
+  const pins = loadPins(serverId);
+  const existing = pins[userId];
+  if (!existing) {
+    pins[userId] = identityPublicKeyHex;
+    savePins(serverId, pins);
+    return "new";
+  }
+  if (existing === identityPublicKeyHex) {
+    return "ok";
+  }
+  return "mismatch";
+});
+ipcMain.handle("identity-pin-get", (_event, serverId, userId) => {
+  const pins = loadPins(serverId);
+  return pins[userId] ?? null;
+});
+ipcMain.handle("identity-pin-remove", (_event, serverId, userId) => {
+  const pins = loadPins(serverId);
+  delete pins[userId];
+  savePins(serverId, pins);
+});
 nativeTheme.on("updated", () => {
   mainWindow == null ? void 0 : mainWindow.webContents.send("theme-changed", nativeTheme.shouldUseDarkColors ? "dark" : "light");
 });

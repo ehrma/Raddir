@@ -11,7 +11,7 @@ import {
 } from "./crypto";
 import type { SignalingClient } from "../signaling-client";
 import type { E2EEKeyExchangeMessage } from "@raddir/shared";
-import { signData, verifySignature, getOrCreateIdentity } from "./identity";
+import { signData, verifySignature, getOrCreateIdentity, checkIdentityPin } from "./identity";
 
 export class KeyManager {
   private ecdhKeyPair: CryptoKeyPair | null = null;
@@ -142,11 +142,16 @@ export class KeyManager {
           break;
         }
 
-        // Check for identity key change (potential MITM)
-        const previousIdentity = this.peerIdentityKeys.get(fromUserId);
-        if (previousIdentity && previousIdentity !== payload.identityPublicKey) {
-          console.warn(`[e2ee] Identity key changed for ${fromUserId} — possible MITM. Old: ${previousIdentity.slice(0, 16)}... New: ${payload.identityPublicKey.slice(0, 16)}...`);
-          // Accept the new key but log the change prominently
+        // TOFU identity pin check — hard-fail on mismatch
+        if (this.currentServerId) {
+          const pinResult = await checkIdentityPin(this.currentServerId, fromUserId, payload.identityPublicKey);
+          if (pinResult === "mismatch") {
+            console.error(`[e2ee] REJECTED public-key-announce from ${fromUserId}: identity key changed (TOFU pin mismatch — possible MITM)`);
+            break;
+          }
+          if (pinResult === "new") {
+            console.log(`[e2ee] First contact with ${fromUserId} — identity key pinned (TOFU)`);
+          }
         }
 
         this.peerIdentityKeys.set(fromUserId, payload.identityPublicKey);
@@ -180,10 +185,19 @@ export class KeyManager {
           break;
         }
 
-        // Verify against the identity key in the message (and cross-check with known identity)
+        // TOFU identity pin check — hard-fail on mismatch
+        if (this.currentServerId) {
+          const pinResult = await checkIdentityPin(this.currentServerId, fromUserId, payload.identityPublicKey);
+          if (pinResult === "mismatch") {
+            console.error(`[e2ee] REJECTED encrypted-channel-key from ${fromUserId}: identity key changed (TOFU pin mismatch — possible MITM)`);
+            break;
+          }
+        }
+
+        // Cross-check with in-session identity
         const knownIdentity = this.peerIdentityKeys.get(fromUserId);
         if (knownIdentity && knownIdentity !== payload.identityPublicKey) {
-          console.warn(`[e2ee] Rejected encrypted-channel-key from ${fromUserId}: identity key mismatch`);
+          console.error(`[e2ee] REJECTED encrypted-channel-key from ${fromUserId}: identity key mismatch with session state`);
           break;
         }
 
@@ -223,9 +237,19 @@ export class KeyManager {
           break;
         }
 
+        // TOFU identity pin check — hard-fail on mismatch
+        if (this.currentServerId) {
+          const pinResult = await checkIdentityPin(this.currentServerId, fromUserId, payload.identityPublicKey);
+          if (pinResult === "mismatch") {
+            console.error(`[e2ee] REJECTED key-ratchet from ${fromUserId}: identity key changed (TOFU pin mismatch — possible MITM)`);
+            break;
+          }
+        }
+
+        // Cross-check with in-session identity
         const knownIdentity3 = this.peerIdentityKeys.get(fromUserId);
         if (knownIdentity3 && knownIdentity3 !== payload.identityPublicKey) {
-          console.warn(`[e2ee] Rejected key-ratchet from ${fromUserId}: identity key mismatch`);
+          console.error(`[e2ee] REJECTED key-ratchet from ${fromUserId}: identity key mismatch with session state`);
           break;
         }
 

@@ -7,6 +7,9 @@ const raddir = (window as any).raddir as {
   identitySign: (data: string) => Promise<string>;
   identityExport: (passphrase: string) => Promise<string | null>;
   identityImportEncrypted: (file: string, passphrase: string) => Promise<{ success: boolean; error?: string }>;
+  identityPinCheck: (serverId: string, userId: string, identityPublicKeyHex: string) => Promise<"new" | "ok" | "mismatch">;
+  identityPinGet: (serverId: string, userId: string) => Promise<string | null>;
+  identityPinRemove: (serverId: string, userId: string) => Promise<void>;
 };
 
 if (!raddir?.identityGetPublicKey || !raddir?.identitySign) {
@@ -38,6 +41,20 @@ export async function signData(data: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * TOFU identity pin check. Returns:
+ * - "new": first contact with this peer on this server — key is now pinned
+ * - "ok": identity key matches the pinned key
+ * - "mismatch": identity key differs from pinned key — REJECT (possible MITM)
+ */
+export async function checkIdentityPin(
+  serverId: string,
+  userId: string,
+  identityPublicKeyHex: string
+): Promise<"new" | "ok" | "mismatch"> {
+  return raddir.identityPinCheck(serverId, userId, identityPublicKeyHex);
 }
 
 /**
