@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useServerStore } from "../stores/serverStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useVerificationStore } from "../stores/verificationStore";
@@ -7,6 +7,7 @@ import { Volume2, ChevronDown, Lock, MicOff, ShieldCheck, Shield, X, Copy } from
 import { cn } from "../lib/cn";
 import { VerifyUserDialog } from "./VerifyUserDialog";
 import { getStoredIdentityPublicKey, computeFingerprint } from "../lib/e2ee/identity";
+import { getUserRoleColor } from "../lib/role-color";
 import type { Channel, SessionInfo } from "@raddir/shared";
 
 interface ChannelNode extends Channel {
@@ -79,6 +80,8 @@ function ChannelNode({
   const isActive = node.id === currentChannelId;
   const hasChildren = node.children.length > 0;
 
+  const [dragOver, setDragOver] = useState(false);
+
   const handleClick = () => {
     const client = getSignalingClient();
     if (!client) return;
@@ -93,15 +96,38 @@ function ChannelNode({
     }
   };
 
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("application/x-raddir-userid")) {
+      e.preventDefault();
+      setDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    setDragOver(false);
+    const userId = e.dataTransfer.getData("application/x-raddir-userid");
+    if (!userId) return;
+    const client = getSignalingClient();
+    if (!client) return;
+    client.send({ type: "move-user", userId, channelId: node.id });
+  }, [node.id]);
+
   return (
     <div>
       <button
         onClick={handleClick}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         className={cn(
           "w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm transition-colors",
-          isActive
-            ? "bg-accent/20 text-accent"
-            : "text-surface-400 hover:text-surface-200 hover:bg-surface-800/50"
+          dragOver
+            ? "bg-accent/30 text-accent ring-1 ring-accent"
+            : isActive
+              ? "bg-accent/20 text-accent"
+              : "text-surface-400 hover:text-surface-200 hover:bg-surface-800/50"
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
@@ -148,13 +174,21 @@ function ChannelUserEntry({ user }: { user: SessionInfo }) {
   const isVerified = useVerificationStore((s) => !isMe && user.publicKey ? s.isVerified(user.publicKey) : false);
   const [showVerify, setShowVerify] = useState(false);
   const [showMyIdentity, setShowMyIdentity] = useState(false);
+  const roleColor = getUserRoleColor(user.userId);
+
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData("application/x-raddir-userid", user.userId);
+    e.dataTransfer.effectAllowed = "move";
+  }, [user.userId]);
 
   return (
     <>
       <button
+        draggable
+        onDragStart={handleDragStart}
         onClick={(e) => { e.stopPropagation(); isMe ? setShowMyIdentity(true) : setShowVerify(true); }}
         className={cn(
-          "w-full flex items-center gap-1.5 py-0.5 text-xs transition-colors text-left",
+          "w-full flex items-center gap-1.5 py-0.5 text-xs transition-colors text-left cursor-grab active:cursor-grabbing",
           isMe ? "text-accent" : "text-surface-400 hover:text-surface-200"
         )}
       >
@@ -170,7 +204,7 @@ function ChannelUserEntry({ user }: { user: SessionInfo }) {
         >
           {user.nickname.charAt(0).toUpperCase()}
         </div>
-        <span className="truncate">{user.nickname}</span>
+        <span className="truncate" style={roleColor ? { color: roleColor } : undefined}>{user.nickname}</span>
         {isMe && <span className="text-[9px] text-surface-500 flex-shrink-0">(you)</span>}
         {isVerified && <ShieldCheck className="w-2.5 h-2.5 text-green-400 flex-shrink-0" />}
         {user.isMuted && <MicOff className="w-2.5 h-2.5 text-surface-600 flex-shrink-0" />}

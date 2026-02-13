@@ -32,13 +32,14 @@ export function useConnection() {
   const [error, setError] = useState<string | null>(null);
   const [kickReason, setKickReason] = useState<string | null>(null);
   const [banReason, setBanReason] = useState<string | null>(null);
-  const serverUrl = useSettingsStore((s) => s.serverUrl);
-  const nickname = useSettingsStore((s) => s.nickname);
   const store = useServerStore;
 
   const connect = useCallback(async () => {
     setConnecting(true);
     setError(null);
+
+    // Read from store at call time to avoid stale closures
+    const { serverUrl, nickname } = useSettingsStore.getState();
 
     if (signalingClient) {
       signalingClient.disconnect();
@@ -130,6 +131,23 @@ export function useConnection() {
       keyManager?.onMemberLeft(data.userId);
     });
 
+    signalingClient.on("user-moved", (msg: any) => {
+      store.getState().updateMember(msg.userId, { channelId: msg.channelId });
+    });
+
+    signalingClient.on("channel-created", (msg: any) => {
+      store.setState((s) => ({ channels: [...s.channels, msg.channel] }));
+    });
+
+    signalingClient.on("channel-deleted", (msg: any) => {
+      const state = store.getState();
+      store.setState((s) => ({ channels: s.channels.filter((c) => c.id !== msg.channelId) }));
+      // If we're in the deleted channel, leave it
+      if (state.currentChannelId === msg.channelId) {
+        state.setCurrentChannel(null);
+      }
+    });
+
     signalingClient.on("user-updated", (msg) => {
       const data = msg as ServerUserUpdatedMessage;
       store.getState().updateMember(data.userId, data.updates as any);
@@ -145,8 +163,21 @@ export function useConnection() {
     });
 
     signalingClient.on("role-assigned", (msg: any) => {
-      // Update the member's roleIds in the store (best-effort since SessionInfo doesn't have roleIds)
-      console.log(`[connection] Role ${msg.assigned ? "assigned" : "unassigned"}: ${msg.roleId} for ${msg.userId}`);
+      const { members } = store.getState();
+      const member = members.get(msg.userId);
+      if (member) {
+        const currentRoleIds: string[] = (member as any).roleIds ?? [];
+        const newRoleIds = msg.assigned
+          ? [...new Set([...currentRoleIds, msg.roleId])]
+          : currentRoleIds.filter((id: string) => id !== msg.roleId);
+        const updatedMembers = new Map(members);
+        updatedMembers.set(msg.userId, { ...member, roleIds: newRoleIds } as any);
+        store.setState({ members: updatedMembers });
+      }
+    });
+
+    signalingClient.on("permissions-updated", (msg: any) => {
+      store.setState({ myPermissions: msg.myPermissions });
     });
 
     signalingClient.on("user-kicked", (msg: any) => {
@@ -170,7 +201,7 @@ export function useConnection() {
     });
 
     signalingClient.connect();
-  }, [serverUrl, nickname]);
+  }, []);
 
   const doDisconnect = useCallback(() => {
     signalingClient?.disconnect();

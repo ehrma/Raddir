@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getChannelsByServer, getChannel, createChannel, deleteChannel } from "../../models/channel.js";
 import type { Channel } from "@raddir/shared";
 import { requireAdmin } from "../auth.js";
+import { broadcastToServer } from "../../signaling/handler.js";
 
 export async function channelRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Params: { serverId: string } }>(
@@ -40,6 +41,7 @@ export async function channelRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const channel = createChannel(serverId, name.trim(), opts);
+      broadcastToServer(serverId, { type: "channel-created", channel });
       reply.status(201);
       return channel;
     }
@@ -55,6 +57,7 @@ export async function channelRoutes(fastify: FastifyInstance): Promise<void> {
 
       const deleted = deleteChannel(request.params.channelId);
       if (!deleted) return reply.code(400).send({ error: "Failed to delete channel" });
+      broadcastToServer(channel.serverId, { type: "channel-deleted", channelId: request.params.channelId });
       return { success: true };
     }
   );

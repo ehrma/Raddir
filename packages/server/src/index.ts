@@ -89,6 +89,8 @@ async function main(): Promise<void> {
         cb(null, false);
       }
     },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   });
 
   // Schedule automatic certificate renewal for Let's Encrypt

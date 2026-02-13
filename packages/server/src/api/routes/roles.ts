@@ -22,16 +22,16 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   // Create a role
   fastify.post<{
     Params: { serverId: string };
-    Body: { name: string; permissions: PermissionSet; priority?: number };
+    Body: { name: string; permissions: PermissionSet; priority?: number; color?: string | null };
   }>("/api/servers/:serverId/roles", { preHandler: requireAdmin }, async (req) => {
-    const { name, permissions, priority } = req.body;
-    return createRole(req.params.serverId, name, permissions, { priority });
+    const { name, permissions, priority, color } = req.body;
+    return createRole(req.params.serverId, name, permissions, { priority, color });
   });
 
   // Update a role
   fastify.patch<{
     Params: { roleId: string };
-    Body: { name?: string; permissions?: PermissionSet; priority?: number };
+    Body: { name?: string; permissions?: PermissionSet; priority?: number; color?: string | null };
   }>("/api/roles/:roleId", { preHandler: requireAdmin }, async (req, reply) => {
     const role = getRole(req.params.roleId);
     if (!role) return reply.code(404).send({ error: "Role not found" });

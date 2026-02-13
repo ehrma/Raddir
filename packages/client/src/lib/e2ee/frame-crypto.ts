@@ -1,20 +1,12 @@
-import { exportKey } from "./crypto";
+// E2EE Frame Encryption using Insertable Streams (main-thread TransformStream).
+// Electron 34 does not support RTCRtpScriptTransform, so we use the older
+// sender.transform / receiver.transform with a TransformStream directly.
 
-interface TransformEntry {
-  port: MessagePort;
-  worker: Worker;
-}
+const UNENCRYPTED_BYTES = 1; // Preserve first byte (Opus TOC)
+const IV_LENGTH = 12;
+const TAG_LENGTH = 128;
 
-// Active transform workers + their message ports
-const activeTransforms: TransformEntry[] = [];
 let currentKey: CryptoKey | null = null;
-
-/**
- * Check if the browser/Electron supports RTCRtpScriptTransform.
- */
-export function supportsEncodedTransform(): boolean {
-  return typeof (globalThis as any).RTCRtpScriptTransform === "function";
-}
 
 /**
  * Update the encryption key for all active frame transforms.
@@ -22,73 +14,91 @@ export function supportsEncodedTransform(): boolean {
  */
 export async function setFrameEncryptionKey(key: CryptoKey | null): Promise<void> {
   currentKey = key;
-  if (!key) {
-    for (const entry of activeTransforms) {
-      entry.port.postMessage({ type: "clearKey" });
-    }
-    return;
-  }
-  const raw = await exportKey(key);
-  for (const entry of activeTransforms) {
-    const copy = raw.slice(0);
-    entry.port.postMessage({ type: "setKey", key: copy }, [copy]);
-  }
 }
 
 /**
- * Create a Worker + MessageChannel, wire RTCRtpScriptTransform, and register for key updates.
- */
-function createTransform(name: "encrypt" | "decrypt"): TransformEntry {
-  const worker = new Worker("/e2ee-worker.js");
-  const channel = new MessageChannel();
-  const entry: TransformEntry = { port: channel.port1, worker };
-  activeTransforms.push(entry);
-
-  const transform = new (globalThis as any).RTCRtpScriptTransform(
-    worker,
-    { name, port: channel.port2 },
-    [channel.port2]
-  );
-
-  // Send current key immediately if available
-  if (currentKey) {
-    exportKey(currentKey).then((raw) => {
-      const copy = raw.slice(0);
-      channel.port1.postMessage({ type: "setKey", key: copy }, [copy]);
-    });
-  }
-  channel.port1.start();
-
-  return { ...entry, transform } as TransformEntry & { transform: any };
-}
-
-/**
- * Apply an RTCRtpScriptTransform to a sender (encrypt outgoing frames).
+ * Apply an encrypt TransformStream to a sender (encrypt outgoing frames).
  */
 export function applyEncryptTransform(sender: RTCRtpSender): void {
-  if (!supportsEncodedTransform()) throw new Error("RTCRtpScriptTransform not supported — cannot encrypt voice frames");
-  const { transform } = createTransform("encrypt") as any;
+  const transform = new TransformStream({
+    async transform(encodedFrame: any, controller: any) {
+      if (!currentKey) {
+        // No key — drop frame to prevent sending unencrypted audio
+        return;
+      }
+      try {
+        const data: ArrayBuffer = encodedFrame.data;
+        const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
+        const payload = data.slice(UNENCRYPTED_BYTES);
+
+        const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+        const encrypted = await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv, tagLength: TAG_LENGTH },
+          currentKey,
+          payload
+        );
+
+        const newData = new ArrayBuffer(UNENCRYPTED_BYTES + iv.byteLength + encrypted.byteLength);
+        const newView = new Uint8Array(newData);
+        newView.set(header, 0);
+        newView.set(iv, UNENCRYPTED_BYTES);
+        newView.set(new Uint8Array(encrypted), UNENCRYPTED_BYTES + iv.byteLength);
+
+        encodedFrame.data = newData;
+        controller.enqueue(encodedFrame);
+      } catch {
+        // Encrypt failed — drop frame to prevent sending unencrypted
+      }
+    },
+  });
   (sender as any).transform = transform;
 }
 
 /**
- * Apply an RTCRtpScriptTransform to a receiver (decrypt incoming frames).
+ * Apply a decrypt TransformStream to a receiver (decrypt incoming frames).
  */
 export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
-  if (!supportsEncodedTransform()) throw new Error("RTCRtpScriptTransform not supported — cannot decrypt voice frames");
-  const { transform } = createTransform("decrypt") as any;
+  const transform = new TransformStream({
+    async transform(encodedFrame: any, controller: any) {
+      if (!currentKey) {
+        // No key — drop frame to prevent playing garbage / unencrypted audio
+        return;
+      }
+      try {
+        const data: ArrayBuffer = encodedFrame.data;
+        if (data.byteLength <= UNENCRYPTED_BYTES + IV_LENGTH) {
+          // Too short to be encrypted — drop
+          return;
+        }
+
+        const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
+        const iv = new Uint8Array(data, UNENCRYPTED_BYTES, IV_LENGTH);
+        const encrypted = data.slice(UNENCRYPTED_BYTES + IV_LENGTH);
+
+        const decrypted = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv, tagLength: TAG_LENGTH },
+          currentKey,
+          encrypted
+        );
+
+        const newData = new ArrayBuffer(UNENCRYPTED_BYTES + decrypted.byteLength);
+        const newView = new Uint8Array(newData);
+        newView.set(header, 0);
+        newView.set(new Uint8Array(decrypted), UNENCRYPTED_BYTES);
+
+        encodedFrame.data = newData;
+        controller.enqueue(encodedFrame);
+      } catch {
+        // Decrypt failed — drop frame to prevent garbage audio
+      }
+    },
+  });
   (receiver as any).transform = transform;
 }
 
 /**
- * Clean up all active workers and ports. Call when leaving a channel.
+ * Clean up. Call when leaving a channel.
  */
 export function resetFrameCrypto(): void {
-  for (const entry of activeTransforms) {
-    entry.port.postMessage({ type: "clearKey" });
-    entry.port.close();
-    entry.worker.terminate();
-  }
-  activeTransforms.length = 0;
   currentKey = null;
 }

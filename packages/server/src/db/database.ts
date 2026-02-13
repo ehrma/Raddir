@@ -301,6 +301,12 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    name: "011_role_color",
+    sql: `
+      ALTER TABLE roles ADD COLUMN color TEXT DEFAULT NULL;
+    `,
+  },
+  {
     name: "010_drop_plaintext_credential",
     sql: `
       -- Remove plaintext credential column — only credential_hash is used now.

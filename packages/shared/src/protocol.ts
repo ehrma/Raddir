@@ -269,6 +269,16 @@ export interface ServerRoleAssignedMessage {
   assigned: boolean;
 }
 
+export interface ServerChannelCreatedMessage {
+  type: "channel-created";
+  channel: Channel;
+}
+
+export interface ServerChannelDeletedMessage {
+  type: "channel-deleted";
+  channelId: string;
+}
+
 export type ServerMessage =
   | ServerAuthResultMessage
   | ServerJoinedServerMessage
@@ -288,7 +298,15 @@ export type ServerMessage =
   | ServerUserMovedMessage
   | ServerUserBannedMessage
   | ServerSpeakingMessage
-  | ServerRoleAssignedMessage;
+  | ServerRoleAssignedMessage
+  | ServerChannelCreatedMessage
+  | ServerChannelDeletedMessage
+  | ServerPermissionsUpdatedMessage;
+
+export interface ServerPermissionsUpdatedMessage {
+  type: "permissions-updated";
+  myPermissions: PermissionSet;
+}
 
 // ─── Shared Info Types ──────────────────────────────────────────────────────
 
@@ -299,11 +317,13 @@ export interface SessionInfo {
   isMuted: boolean;
   isDeafened: boolean;
   publicKey?: string;
+  roleIds?: string[];
 }
 
 export interface RoleInfo {
   id: string;
   name: string;
+  color: string | null;
   priority: number;
   permissions: PermissionSet;
   isDefault: boolean;

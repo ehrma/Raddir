@@ -17,10 +17,19 @@ export function IdentitySettings() {
     getStoredIdentityPublicKey().then(setPublicKey);
   }, []);
 
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
+
   const handleRegenerate = async () => {
-    clearIdentity();
-    const { publicKeyHex } = await getOrCreateIdentity();
-    setPublicKey(publicKeyHex);
+    try {
+      console.log("[identity] Regenerating identity...");
+      const newPublicKey = await clearIdentity();
+      console.log("[identity] New public key:", newPublicKey?.slice(0, 16));
+      setPublicKey(newPublicKey);
+      setShowRegenConfirm(false);
+    } catch (err) {
+      console.error("[identity] Failed to regenerate:", err);
+      setError(String(err));
+    }
   };
 
   const handleCopy = () => {
@@ -88,7 +97,7 @@ export function IdentitySettings() {
         {publicKey ? (
           <>
             <code className="block text-xs text-surface-400 font-mono break-all mb-2">
-              {publicKey.slice(0, 32)}...
+              {publicKey.length > 54 ? publicKey.slice(54) : publicKey}
             </code>
             <p className="text-[10px] text-surface-500 mb-3">
               Fingerprint: <span className="font-mono text-surface-400">{fingerprint}</span>
@@ -116,7 +125,7 @@ export function IdentitySettings() {
                 Import
               </button>
               <button
-                onClick={handleRegenerate}
+                onClick={() => setShowRegenConfirm(true)}
                 className="flex items-center gap-1 px-2 py-1 text-[10px] bg-surface-700 rounded text-surface-400 hover:text-orange-400 transition-colors"
               >
                 <RefreshCw className="w-3 h-3" />
@@ -212,6 +221,32 @@ export function IdentitySettings() {
           </div>
         )}
       </div>
+
+      {/* Regenerate confirmation dialog */}
+      {showRegenConfirm && (
+        <div className="p-3 bg-red-950/30 rounded-lg border border-red-900/50 space-y-2">
+          <p className="text-xs font-medium text-red-400">Are you sure?</p>
+          <p className="text-[10px] text-surface-400 leading-relaxed">
+            Regenerating your identity will <strong className="text-red-400">permanently delete</strong> your current identity key.
+            Other users will need to re-verify you, and your TOFU pins on their devices will show a mismatch
+            (they will need to manually re-trust you).
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRegenerate}
+              className="px-3 py-1.5 text-[10px] font-medium bg-red-600 text-white rounded hover:bg-red-500 transition-colors"
+            >
+              Regenerate Identity
+            </button>
+            <button
+              onClick={() => setShowRegenConfirm(false)}
+              className="px-3 py-1.5 text-[10px] text-surface-400 hover:text-surface-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Verified Users */}
       <div>

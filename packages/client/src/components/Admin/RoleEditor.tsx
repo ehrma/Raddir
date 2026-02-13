@@ -1,14 +1,20 @@
 import { useState, useEffect } from "react";
 import { useServerStore } from "../../stores/serverStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { getApiBase, getAuthHeaders } from "../../lib/api-base";
 import { cn } from "../../lib/cn";
-import { Plus, Trash2, Save, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Save, ChevronDown, ChevronRight, Palette, X } from "lucide-react";
 import type { PermissionSet, PermissionKey } from "@raddir/shared";
 import { PERMISSION_KEYS } from "@raddir/shared";
+
+const ROLE_COLOR_PRESETS = [
+  null, "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899", "#f43f5e",
+];
 
 interface RoleData {
   id: string;
   name: string;
+  color: string | null;
   priority: number;
   permissions: PermissionSet;
   isDefault: boolean;
@@ -51,6 +57,7 @@ export function RoleEditor() {
       setRoles(storeRoles.map((r) => ({
         id: r.id,
         name: r.name,
+        color: r.color ?? null,
         priority: r.priority,
         permissions: r.permissions,
         isDefault: r.isDefault,
@@ -80,6 +87,7 @@ export function RoleEditor() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           name: selectedRole.name,
+          color: selectedRole.color,
           permissions: selectedRole.permissions,
           priority: selectedRole.priority,
         }),
@@ -102,7 +110,7 @@ export function RoleEditor() {
       const res = await fetch(`${getApiBase()}/api/servers/${serverId}/roles`, {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ name: newRoleName.trim(), permissions: defaultPerms, priority: 5 }),
+        body: JSON.stringify({ name: newRoleName.trim(), permissions: defaultPerms, priority: 5, color: null }),
       });
       const role = await res.json();
       setRoles((prev) => [...prev, role]);
@@ -116,16 +124,24 @@ export function RoleEditor() {
   const handleDelete = async () => {
     if (!selectedRole || selectedRole.isDefault) return;
     try {
-      await fetch(`${getApiBase()}/api/roles/${selectedRole.id}`, { method: "DELETE", headers: getAuthHeaders() });
-      setRoles((prev) => prev.filter((r) => r.id !== selectedRole.id));
-      setSelectedRoleId(roles[0]?.id ?? null);
+      const { savedServers, serverUrl } = useSettingsStore.getState();
+      const server = savedServers.find((s) => s.address === serverUrl);
+      const deleteHeaders: Record<string, string> = {};
+      if (server?.adminToken) deleteHeaders["Authorization"] = `Bearer ${server.adminToken}`;
+      const res = await fetch(`${getApiBase()}/api/roles/${selectedRole.id}`, { method: "DELETE", headers: deleteHeaders });
+      if (res.ok) {
+        setRoles((prev) => prev.filter((r) => r.id !== selectedRole.id));
+        setSelectedRoleId(roles[0]?.id ?? null);
+      } else {
+        console.error("[roles] Failed to delete role:", res.status, await res.text());
+      }
     } catch (err) {
       console.error("[roles] Failed to delete role:", err);
     }
   };
 
   return (
-    <div className="flex gap-4 h-[400px]">
+    <div className="flex gap-4 h-full">
       {/* Role list */}
       <div className="w-44 flex flex-col gap-2">
         <div className="space-y-0.5 flex-1 overflow-y-auto">
@@ -140,6 +156,9 @@ export function RoleEditor() {
                   : "text-surface-400 hover:text-surface-200 hover:bg-surface-800"
               )}
             >
+              {role.color && (
+                <span className="inline-block w-2 h-2 rounded-full mr-1 flex-shrink-0" style={{ backgroundColor: role.color }} />
+              )}
               {role.name}
               {role.isDefault && <span className="text-surface-600 ml-1">(default)</span>}
             </button>
@@ -182,6 +201,49 @@ export function RoleEditor() {
               className="px-2 py-1 bg-surface-800 border border-surface-700 rounded text-sm text-surface-200 focus:outline-none focus:border-accent"
             />
             <span className="text-[10px] text-surface-500">Priority: {selectedRole.priority}</span>
+          </div>
+
+          {/* Color picker */}
+          <div className="flex items-center gap-2">
+            <Palette className="w-3.5 h-3.5 text-surface-500" />
+            <span className="text-[10px] text-surface-400">Color:</span>
+            <div className="flex gap-1">
+              {ROLE_COLOR_PRESETS.map((color, i) => (
+                <button
+                  key={i}
+                  onClick={() =>
+                    setRoles((prev) =>
+                      prev.map((r) =>
+                        r.id === selectedRoleId ? { ...r, color } : r
+                      )
+                    )
+                  }
+                  className={cn(
+                    "w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center",
+                    selectedRole.color === color
+                      ? "border-white scale-110"
+                      : "border-transparent hover:border-surface-500"
+                  )}
+                  style={{ backgroundColor: color ?? undefined }}
+                  title={color ?? "No color"}
+                >
+                  {color === null && <X className="w-3 h-3 text-surface-500" />}
+                </button>
+              ))}
+              <input
+                type="color"
+                value={selectedRole.color ?? "#3b82f6"}
+                onChange={(e) =>
+                  setRoles((prev) =>
+                    prev.map((r) =>
+                      r.id === selectedRoleId ? { ...r, color: e.target.value } : r
+                    )
+                  )
+                }
+                className="w-5 h-5 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+                title="Custom color"
+              />
+            </div>
           </div>
 
           <div className="space-y-1">
