@@ -11,7 +11,30 @@ import {
 } from "../../models/permission.js";
 import { computeEffectivePermissions } from "../../permissions/engine.js";
 import type { PermissionSet } from "@raddir/shared";
+import { PERMISSION_KEYS } from "@raddir/shared";
 import { requireAdmin } from "../auth.js";
+import { getServerClients } from "../../signaling/handler.js";
+import { getUserRoleIds } from "../../models/user.js";
+
+/** After a role is modified or deleted, recompute and push permissions to all affected connected clients. */
+function broadcastPermissionsForRole(serverId: string, roleId: string): void {
+  const serverClients = getServerClients(serverId);
+  for (const client of serverClients) {
+    const userRoleIds = getUserRoleIds(client.userId, serverId);
+    if (!userRoleIds.includes(roleId)) continue;
+    let perms = computeEffectivePermissions(client.userId, serverId);
+    if ((client as any).isAdmin) {
+      perms = { ...perms };
+      for (const key of PERMISSION_KEYS) {
+        perms[key] = "allow";
+      }
+    }
+    const ws = (client as any).ws;
+    if (ws?.readyState === 1) {
+      ws.send(JSON.stringify({ type: "permissions-updated", myPermissions: perms }));
+    }
+  }
+}
 
 export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   // List roles for a server
@@ -37,7 +60,11 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
     if (!role) return reply.code(404).send({ error: "Role not found" });
 
     updateRole(req.params.roleId, req.body);
-    return getRole(req.params.roleId);
+    const updated = getRole(req.params.roleId);
+    if (updated) {
+      broadcastPermissionsForRole(role.serverId, role.id);
+    }
+    return updated;
   });
 
   // Delete a role
@@ -46,6 +73,7 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
     if (!role) return reply.code(404).send({ error: "Role not found" });
     if (role.isDefault) return reply.code(400).send({ error: "Cannot delete default role" });
 
+    broadcastPermissionsForRole(role.serverId, role.id);
     deleteRole(req.params.roleId);
     return { success: true };
   });
@@ -61,6 +89,8 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
     Body: { permissions: Partial<PermissionSet> };
   }>("/api/channels/:channelId/overrides/:roleId", { preHandler: requireAdmin }, async (req) => {
     setChannelOverride(req.params.channelId, req.params.roleId, req.body.permissions);
+    const role = getRole(req.params.roleId);
+    if (role) broadcastPermissionsForRole(role.serverId, role.id);
     return { success: true };
   });
 
@@ -68,7 +98,9 @@ export async function roleRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.delete<{
     Params: { channelId: string; roleId: string };
   }>("/api/channels/:channelId/overrides/:roleId", { preHandler: requireAdmin }, async (req) => {
+    const role = getRole(req.params.roleId);
     deleteChannelOverride(req.params.channelId, req.params.roleId);
+    if (role) broadcastPermissionsForRole(role.serverId, role.id);
     return { success: true };
   });
 

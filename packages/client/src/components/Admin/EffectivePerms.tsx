@@ -6,8 +6,8 @@ import { PERMISSION_KEYS } from "@raddir/shared";
 import { cn } from "../../lib/cn";
 
 const PERMISSION_LABELS: Record<PermissionKey, string> = {
-  join: "Join Channels", speak: "Speak", whisper: "Whisper",
-  moveUsers: "Move Users", kick: "Kick", ban: "Ban",
+  join: "Join Channels", speak: "Speak", video: "Video", screenShare: "Screen Share",
+  whisper: "Whisper", moveUsers: "Move Users", kick: "Kick", ban: "Ban",
   admin: "Administrator", manageChannels: "Manage Channels",
   managePermissions: "Manage Permissions", manageRoles: "Manage Roles",
 };

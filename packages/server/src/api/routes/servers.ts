@@ -33,12 +33,12 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Update server name / description
   fastify.patch<{
     Params: { serverId: string };
-    Body: { name?: string; description?: string };
+    Body: { name?: string; description?: string; maxWebcamProducers?: number; maxScreenProducers?: number };
   }>("/api/servers/:serverId", { preHandler: requireAdmin }, async (req, reply) => {
     const server = getServer(req.params.serverId);
     if (!server) return reply.code(404).send({ error: "Server not found" });
 
-    const { name, description } = req.body;
+    const { name, description, maxWebcamProducers, maxScreenProducers } = req.body;
     if (name !== undefined && !name.trim()) {
       return reply.code(400).send({ error: "Server name cannot be empty" });
     }
@@ -46,6 +46,8 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     updateServer(req.params.serverId, {
       name: name?.trim(),
       description: description !== undefined ? description : undefined,
+      maxWebcamProducers: maxWebcamProducers !== undefined ? Math.max(0, Math.min(50, maxWebcamProducers)) : undefined,
+      maxScreenProducers: maxScreenProducers !== undefined ? Math.max(0, Math.min(10, maxScreenProducers)) : undefined,
     });
 
     const updated = getServer(req.params.serverId)!;
@@ -53,6 +55,8 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       type: "server-updated",
       serverName: updated.name,
       serverDescription: updated.description,
+      maxWebcamProducers: updated.maxWebcamProducers,
+      maxScreenProducers: updated.maxScreenProducers,
     });
 
     return updated;

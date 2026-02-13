@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("raddir", {
     ipcRenderer.invoke("identity-pin-get", serverId, userId),
   identityPinRemove: (serverId, userId) =>
     ipcRenderer.invoke("identity-pin-remove", serverId, userId),
+  getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
   onPttPressed: (callback) => {
     ipcRenderer.on("ptt-pressed", callback);
     return () => ipcRenderer.removeListener("ptt-pressed", callback);

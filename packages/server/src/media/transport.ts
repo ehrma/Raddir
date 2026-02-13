@@ -82,12 +82,13 @@ export async function createProducer(
   peerId: string,
   transportId: string,
   kind: MediaKind,
-  rtpParameters: RtpParameters
+  rtpParameters: RtpParameters,
+  appData?: Record<string, unknown>
 ): Promise<Producer> {
   const transport = findTransport(peerId, transportId);
   if (!transport) throw new Error(`Transport ${transportId} not found`);
 
-  const producer = await transport.produce({ kind, rtpParameters });
+  const producer = await transport.produce({ kind, rtpParameters, appData: appData ?? {} });
 
   const peer = getOrCreatePeer(peerId);
   peer.producers.set(producer.id, producer);

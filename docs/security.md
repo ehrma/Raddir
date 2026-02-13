@@ -15,15 +15,17 @@ Raddir uses **two layers** of encryption for voice and text:
 ### Layer 2: End-to-End Encryption (always on)
 
 - **Voice**: AES-256-GCM applied to each Opus frame via Insertable Streams API
+- **Video & screen share**: same AES-256-GCM Insertable Streams pipeline as voice; VP8/VP9 frames encrypted before reaching the SFU
 - **Text chat**: AES-256-GCM applied to message content before sending
 - Protects against the **server itself** — it cannot decrypt content
 
 ## What the Server CANNOT Do
 
 - **Listen to voice audio** — Opus frames are encrypted before reaching the SFU
+- **View video or screen shares** — VP8/VP9 frames are encrypted before reaching the SFU
 - **Read text messages** — server stores only ciphertext
-- **Perform content analysis** — no speech recognition, no keyword detection
-- **Record decryptable audio** — even if packets are captured, they are AES-256-GCM encrypted
+- **Perform content analysis** — no speech recognition, no keyword detection, no image analysis
+- **Record decryptable audio or video** — even if packets are captured, they are AES-256-GCM encrypted
 - **Recover encryption keys** — keys are exchanged directly between clients; the server only relays opaque blobs
 
 ## What the Server CAN See
@@ -52,7 +54,7 @@ The following data is **not** end-to-end encrypted by design:
 
 These are analogous to a Discord server icon or a TeamSpeak server name — they are metadata that the server must know to function. Encrypting them would provide no security benefit since they are shown to all members anyway.
 
-**E2EE protects _content_ (voice audio and text messages). Metadata and cosmetic data are not content.**
+**E2EE protects _content_ (voice audio, video, screen share, and text messages). Metadata and cosmetic data are not content.**
 
 ## How E2EE Works
 
@@ -71,11 +73,30 @@ These are analogous to a Discord server icon or a TeamSpeak server name — they
 2. Browser encodes audio to Opus
 3. **Insertable Streams** intercepts the encoded frame before RTP packetization
 4. Frame is encrypted with **AES-256-GCM** using the channel key
-5. IV = frame counter (incrementing) + sender ID (prevents IV reuse across senders)
-6. Encrypted frame is packetized into RTP and sent via DTLS-SRTP to the SFU
-7. SFU forwards the encrypted RTP packets to other channel members (it cannot decrypt them)
-8. Receiving client's Insertable Streams decrypts the frame
-9. Browser decodes Opus and plays audio
+5. **1 byte** of the Opus frame header (TOC byte) is left unencrypted so the RTP stack can parse the frame
+6. A random **12-byte IV** is generated per frame (via `crypto.getRandomValues`)
+7. Encrypted frame layout: `[1-byte header | 12-byte IV | AES-256-GCM ciphertext + 16-byte auth tag]`
+8. Encrypted frame is packetized into RTP and sent via DTLS-SRTP to the SFU
+9. SFU forwards the encrypted RTP packets to other channel members (it cannot decrypt them)
+10. Receiving client's Insertable Streams decrypts the frame using the same channel key
+11. Browser decodes Opus and plays audio
+
+### Video & Screen Share Encryption
+
+1. Client captures webcam or screen via `getUserMedia` / desktop capture API
+2. Browser encodes video to VP8 or VP9
+3. **Simulcast**: the browser produces multiple quality layers per producer:
+   - **Webcam**: 3 layers — quarter resolution (rid `q`, 150 kbps), half resolution (rid `h`, ~525 kbps), full resolution (rid `f`, up to 1.5 Mbps)
+   - **Screen share**: 2 layers — half resolution (rid `q`, ~625 kbps), full resolution (rid `f`, up to 2.5 Mbps)
+4. **All simulcast layers go through a single `RTCRtpSender`** — the Insertable Streams transform encrypts every frame regardless of which layer it belongs to
+5. **10 bytes** of the VP8/VP9 frame header (payload descriptor + keyframe indicator) are left unencrypted so the SFU can detect keyframes and select which layer to forward
+6. A random **12-byte IV** is generated per frame
+7. Encrypted frame layout: `[10-byte header | 12-byte IV | AES-256-GCM ciphertext + 16-byte auth tag]`
+8. SFU selects which simulcast layer to forward to each consumer based on the unencrypted header bytes and the consumer's preferred layer setting
+9. Receiving client's Insertable Streams decrypts the frame using the channel key (with `mediaKind: "video"` to match the 10-byte header)
+10. Browser decodes VP8/VP9 and renders video
+
+**What the 10 unencrypted header bytes reveal:** Only the VP8/VP9 payload descriptor — whether a frame is a keyframe, the picture ID, and temporal layer index. This is structural metadata needed for SFU routing. The actual pixel data is always encrypted.
 
 ### Text Chat Encryption
 
@@ -110,11 +131,24 @@ These are analogous to a Discord server icon or a TeamSpeak server name — they
 - Users can compare safety numbers out-of-band (e.g., in person, via secure channel)
 - The UI shows a lock icon and verification status per user
 
-### E2EE Enforcement for Voice
+### E2EE Enforcement for Voice and Video
 
 - Audio **will not transmit or receive** until the E2EE channel key is established
 - If the key is not established within 10 seconds, audio setup **aborts** — no unencrypted fallback
 - Late-arriving producers are also rejected if no E2EE key is active
+- Video (webcam and screen share) **will not produce** unless `e2eeActive` is true in the voice store — checked before `getUserMedia` is even called
+- If the E2EE key is null at frame time, the encrypt transform **drops the frame** (never enqueued) — a second failsafe independent of the gating check
+- If encryption fails for any reason, the frame is **silently dropped** — never sent unencrypted
+- On the receiving side, if the key is null or decryption fails, the frame is **silently dropped** — never rendered
+- Frames too short to contain a valid ciphertext (< header + IV length) are also dropped
+
+### Server-Side Video Producer Limits
+
+- The server enforces configurable limits on concurrent webcam and screen share producers per channel
+- Defaults: **5 webcams**, **1 screen share** per channel (configurable 0–50 and 0–10 via admin panel)
+- When the limit is reached, the server rejects the `produce` request with a `PRODUCER_LIMIT` error
+- The client handles the rejection by stopping the camera/capture track and reverting UI state
+- Setting a limit to 0 effectively disables that media type server-wide
 
 ### Key-Holder Election
 
@@ -223,7 +257,7 @@ Until one of these is implemented, E2EE protects against **passive observers** a
 | chat | `chat-message` | 5/sec |
 | e2ee | `e2ee` | 10/sec |
 | speaking | `speaking` | 20/sec |
-| media | `create-transport`, `connect-transport`, `produce`, `consume`, `resume-consumer` | 5/sec |
+| media | `create-transport`, `connect-transport`, `produce`, `consume`, `resume-consumer`, `set-preferred-layers` | 5/sec |
 | general | everything else | 30/sec |
 
 Exceeding the limit returns a `RATE_LIMITED` error and drops the message. Counters are per-WebSocket connection and garbage-collected on disconnect.
@@ -266,8 +300,11 @@ Electron's `certificate-error` handler allows TLS bypass for a host set via the 
 |---|---|---|---|
 | Transport encryption | ✅ DTLS-SRTP | ✅ | ✅ |
 | E2E voice encryption | ✅ AES-256-GCM | ❌ | ❌ |
+| E2E video encryption | ✅ AES-256-GCM | ❌ | ❌ |
 | E2E text encryption | ✅ AES-256-GCM | ❌ | ❌ |
 | Server can hear audio | ❌ No | ✅ Yes | ✅ Yes |
+| Server can see video | ❌ No | ✅ Yes | ✅ Yes |
+| Simulcast (adaptive quality) | ✅ 3-layer | ❌ | ✅ |
 | Telemetry | ❌ None | ⚠️ Some | ✅ Extensive |
 | Self-hostable | ✅ | ✅ | ❌ |
 | Open source | ✅ | ❌ | ❌ |

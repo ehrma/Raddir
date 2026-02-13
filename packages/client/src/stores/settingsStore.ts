@@ -25,6 +25,13 @@ export interface SettingsState {
   autoGainControl: boolean;
   outputVolume: number;
 
+  // Video settings
+  webcamResolution: "480p" | "720p" | "1080p";
+  webcamFps: number;
+  webcamBitrate: number; // kbps
+  screenShareBitrate: number; // kbps
+  screenShareFps: number;
+
   setTheme: (theme: "dark" | "light" | "system") => void;
   setResolvedTheme: (theme: "dark" | "light") => void;
   setServerUrl: (url: string) => void;
@@ -38,6 +45,11 @@ export interface SettingsState {
   setEchoCancellation: (enabled: boolean) => void;
   setAutoGainControl: (enabled: boolean) => void;
   setOutputVolume: (volume: number) => void;
+  setWebcamResolution: (res: "480p" | "720p" | "1080p") => void;
+  setWebcamFps: (fps: number) => void;
+  setWebcamBitrate: (kbps: number) => void;
+  setScreenShareBitrate: (kbps: number) => void;
+  setScreenShareFps: (fps: number) => void;
   addServer: (name: string, address: string, password?: string, adminToken?: string) => void;
   removeServer: (id: string) => void;
   updateServer: (id: string, name: string, address: string) => void;
@@ -62,6 +74,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   autoGainControl: true,
   outputVolume: 1.0,
 
+  webcamResolution: "720p",
+  webcamFps: 30,
+  webcamBitrate: 1500,
+  screenShareBitrate: 2500,
+  screenShareFps: 15,
+
   setTheme: (theme) => set({ theme }),
   setResolvedTheme: (resolvedTheme) => set({ resolvedTheme }),
   setServerUrl: (serverUrl) => set({ serverUrl }),
@@ -75,6 +93,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setEchoCancellation: (echoCancellation) => set({ echoCancellation }),
   setAutoGainControl: (autoGainControl) => set({ autoGainControl }),
   setOutputVolume: (outputVolume) => set({ outputVolume }),
+  setWebcamResolution: (webcamResolution) => set({ webcamResolution }),
+  setWebcamFps: (webcamFps) => set({ webcamFps }),
+  setWebcamBitrate: (webcamBitrate) => set({ webcamBitrate }),
+  setScreenShareBitrate: (screenShareBitrate) => set({ screenShareBitrate }),
+  setScreenShareFps: (screenShareFps) => set({ screenShareFps }),
   addServer: (name, address, password, adminToken) => set((s) => ({
     savedServers: [...s.savedServers, { id: Math.random().toString(36).slice(2, 10), name, address, password: password || undefined, adminToken: adminToken || undefined }],
   })),

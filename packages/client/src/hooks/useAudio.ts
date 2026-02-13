@@ -8,6 +8,7 @@ import { VoiceActivityDetector } from "../lib/audio/vad";
 import { playJoinSound, playLeaveSound, playMuteSound, playUnmuteSound } from "../lib/audio/sounds";
 import { setFrameEncryptionKey, resetFrameCrypto } from "../lib/e2ee/frame-crypto";
 import { setActiveMediaClient } from "../lib/audio/audio-bridge";
+import { setVideoMediaClient } from "./useVideo";
 import type { ServerJoinedChannelMessage, ServerNewProducerMessage } from "@raddir/shared";
 
 let mediaClient: MediaClient | null = null;
@@ -58,6 +59,7 @@ export function useAudio() {
 
         mediaClient = new MediaClient(signaling);
         setActiveMediaClient(mediaClient);
+        setVideoMediaClient(mediaClient);
         await mediaClient.loadDevice(data.routerRtpCapabilities as any);
 
         // Send our RTP capabilities to the server so it can create consumers for us
@@ -411,6 +413,7 @@ function cleanupAudio(): void {
   mediaClient?.close();
   mediaClient = null;
   setActiveMediaClient(null);
+  setVideoMediaClient(null);
 
   if (audioContext) {
     audioContext.close().catch(() => {});
