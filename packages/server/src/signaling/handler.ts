@@ -355,6 +355,9 @@ async function handleAuth(
   send(ws, {
     type: "joined-server",
     serverId: server.id,
+    serverName: server.name,
+    serverDescription: server.description,
+    serverIconUrl: server.iconPath ? `/api/servers/${server.id}/icon` : null,
     channels,
     members,
     roles: roleInfos,

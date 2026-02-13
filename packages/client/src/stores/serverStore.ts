@@ -7,6 +7,9 @@ export interface ServerState {
   authenticated: boolean;
   userId: string | null;
   serverId: string | null;
+  serverName: string | null;
+  serverDescription: string | null;
+  serverIconUrl: string | null;
   channels: Channel[];
   members: Map<string, SessionInfo>;
   roles: RoleInfo[];
@@ -17,6 +20,9 @@ export interface ServerState {
   setAuthenticated: (authenticated: boolean, userId?: string) => void;
   setServerData: (data: {
     serverId: string;
+    serverName: string;
+    serverDescription: string;
+    serverIconUrl: string | null;
     channels: Channel[];
     members: SessionInfo[];
     roles: RoleInfo[];
@@ -34,6 +40,9 @@ const initialState = {
   authenticated: false,
   userId: null as string | null,
   serverId: null as string | null,
+  serverName: null as string | null,
+  serverDescription: null as string | null,
+  serverIconUrl: null as string | null,
   channels: [] as Channel[],
   members: new Map<string, SessionInfo>(),
   roles: [] as RoleInfo[],
@@ -52,6 +61,9 @@ export const useServerStore = create<ServerState>((set) => ({
   setServerData: (data) =>
     set({
       serverId: data.serverId,
+      serverName: data.serverName,
+      serverDescription: data.serverDescription,
+      serverIconUrl: data.serverIconUrl,
       channels: data.channels,
       members: new Map(data.members.map((m) => [m.userId, m])),
       roles: data.roles,

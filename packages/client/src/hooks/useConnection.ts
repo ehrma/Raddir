@@ -102,11 +102,22 @@ export function useConnection() {
       const data = msg as ServerJoinedServerMessage;
       store.getState().setServerData({
         serverId: data.serverId,
+        serverName: data.serverName,
+        serverDescription: data.serverDescription,
+        serverIconUrl: data.serverIconUrl,
         channels: data.channels,
         members: data.members,
         roles: data.roles,
         myPermissions: data.myPermissions,
       });
+    });
+
+    signalingClient.on("server-updated", (msg: any) => {
+      const updates: Record<string, any> = {};
+      if (msg.serverName !== undefined) updates.serverName = msg.serverName;
+      if (msg.serverDescription !== undefined) updates.serverDescription = msg.serverDescription;
+      if (msg.serverIconUrl !== undefined) updates.serverIconUrl = msg.serverIconUrl;
+      store.setState(updates);
     });
 
     signalingClient.on("joined-channel", (msg: any) => {

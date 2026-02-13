@@ -2,6 +2,7 @@ export interface Server {
   id: string;
   name: string;
   description: string;
+  iconPath: string | null;
   createdAt: number;
   maxUsers: number;
 }

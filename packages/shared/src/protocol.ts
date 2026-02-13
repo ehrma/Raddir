@@ -153,6 +153,9 @@ export interface ServerAuthResultMessage {
 export interface ServerJoinedServerMessage {
   type: "joined-server";
   serverId: string;
+  serverName: string;
+  serverDescription: string;
+  serverIconUrl: string | null;
   channels: Channel[];
   members: SessionInfo[];
   roles: RoleInfo[];
@@ -301,7 +304,15 @@ export type ServerMessage =
   | ServerRoleAssignedMessage
   | ServerChannelCreatedMessage
   | ServerChannelDeletedMessage
-  | ServerPermissionsUpdatedMessage;
+  | ServerPermissionsUpdatedMessage
+  | ServerUpdatedMessage;
+
+export interface ServerUpdatedMessage {
+  type: "server-updated";
+  serverName?: string;
+  serverDescription?: string;
+  serverIconUrl?: string | null;
+}
 
 export interface ServerPermissionsUpdatedMessage {
   type: "permissions-updated";
