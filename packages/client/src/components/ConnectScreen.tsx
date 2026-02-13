@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSettingsStore, type SavedServer } from "../stores/settingsStore";
 import { useServerStore } from "../stores/serverStore";
-import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, LockOpen, Ticket } from "lucide-react";
+import { Shield, Wifi, Plus, Trash2, Server, Settings, Lock, LockOpen, Ticket, Pencil } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useConnection } from "../hooks/useConnection";
 import { SettingsPanel } from "./Settings/SettingsPanel";
@@ -10,7 +10,7 @@ import { normalizeServerUrl } from "../lib/normalize-url";
 import logoImg from "../assets/raddir-shield-logo.png";
 
 export function ConnectScreen() {
-  const { nickname, savedServers, setServerUrl, setNickname, addServer, removeServer, updateServerPassword, updateServerAdminToken } = useSettingsStore();
+  const { nickname, savedServers, setServerUrl, setNickname, addServer, removeServer, updateServer, updateServerPassword, updateServerAdminToken } = useSettingsStore();
   const { connect, connecting, error } = useConnection();
   const [selectedId, setSelectedId] = useState<string | null>(savedServers[0]?.id ?? null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -19,9 +19,10 @@ export function ConnectScreen() {
   const [newAddress, setNewAddress] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newAdminToken, setNewAdminToken] = useState("");
-  const [editingPassword, setEditingPassword] = useState(false);
+  const [editingServer, setEditingServer] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editAddress, setEditAddress] = useState("");
   const [editPassword, setEditPassword] = useState("");
-  const [editingAdminToken, setEditingAdminToken] = useState(false);
   const [editAdminToken, setEditAdminToken] = useState("");
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
@@ -302,93 +303,109 @@ export function ConnectScreen() {
 
           {selectedServer ? (
             <div className="space-y-4">
-              <div className="p-4 bg-surface-800/40 border border-surface-700 rounded-xl text-center">
-                <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center mx-auto mb-2">
-                  <Server className="w-5 h-5 text-surface-400" />
-                </div>
-                <p className="text-sm font-semibold text-surface-200">{selectedServer.name}</p>
-                <p className="text-[10px] text-surface-500 mt-0.5">{selectedServer.address}</p>
-                {selectedServer.password && !editingPassword && <p className="text-[9px] text-surface-600 mt-0.5">Password protected</p>}
-              </div>
-
-              {editingPassword ? (
-                <div className="flex gap-2 mt-2">
-                  <input
-                    type="password"
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                    placeholder="Enter password"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        updateServerPassword(selectedServer.id, editPassword.trim() || undefined);
-                        setEditingPassword(false);
-                        setEditPassword("");
-                      }
-                    }}
-                    className="flex-1 px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-md text-surface-100 text-xs placeholder:text-surface-500 focus:outline-none focus:border-accent"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => {
-                      updateServerPassword(selectedServer.id, editPassword.trim() || undefined);
-                      setEditingPassword(false);
-                      setEditPassword("");
-                    }}
-                    className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-accent text-white hover:bg-accent-hover transition-colors"
-                  >Save</button>
-                  <button
-                    onClick={() => { setEditingPassword(false); setEditPassword(""); }}
-                    className="px-2.5 py-1.5 rounded-md text-xs text-surface-400 hover:bg-surface-700 transition-colors"
-                  >Cancel</button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setEditingPassword(true); setEditPassword(selectedServer.password ?? ""); }}
-                  className="flex items-center gap-1.5 text-[10px] text-surface-500 hover:text-surface-300 transition-colors mt-2"
-                >
-                  {selectedServer.password ? <Lock className="w-3 h-3" /> : <LockOpen className="w-3 h-3" />}
-                  {selectedServer.password ? "Change password" : "Set password"}
-                </button>
-              )}
-
-              {editingAdminToken ? (
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={editAdminToken}
-                    onChange={(e) => setEditAdminToken(e.target.value)}
-                    placeholder="Admin token"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        updateServerAdminToken(selectedServer.id, editAdminToken.trim() || undefined);
-                        setEditingAdminToken(false);
-                        setEditAdminToken("");
-                      }
-                    }}
-                    className="flex-1 px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-md text-surface-100 text-xs placeholder:text-surface-500 focus:outline-none focus:border-accent"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => {
-                      updateServerAdminToken(selectedServer.id, editAdminToken.trim() || undefined);
-                      setEditingAdminToken(false);
-                      setEditAdminToken("");
-                    }}
-                    className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-accent text-white hover:bg-accent-hover transition-colors"
-                  >Save</button>
-                  <button
-                    onClick={() => { setEditingAdminToken(false); setEditAdminToken(""); }}
-                    className="px-2.5 py-1.5 rounded-md text-xs text-surface-400 hover:bg-surface-700 transition-colors"
-                  >Cancel</button>
+              {editingServer ? (
+                <div className="p-4 bg-surface-800/40 border border-surface-700 rounded-xl space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center mx-auto">
+                    <Server className="w-5 h-5 text-surface-400" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-surface-500 uppercase tracking-wider mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Server name"
+                      className="w-full px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-md text-surface-100 text-xs placeholder:text-surface-500 focus:outline-none focus:border-accent"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-surface-500 uppercase tracking-wider mb-1">Address</label>
+                    <input
+                      type="text"
+                      value={editAddress}
+                      onChange={(e) => setEditAddress(e.target.value)}
+                      placeholder="host:port"
+                      className="w-full px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-md text-surface-100 text-xs placeholder:text-surface-500 focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-surface-500 uppercase tracking-wider mb-1">Password</label>
+                    <input
+                      type="password"
+                      value={editPassword}
+                      onChange={(e) => setEditPassword(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-md text-surface-100 text-xs placeholder:text-surface-500 focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-surface-500 uppercase tracking-wider mb-1">Admin Token</label>
+                    <input
+                      type="password"
+                      value={editAdminToken}
+                      onChange={(e) => setEditAdminToken(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-md text-surface-100 text-xs placeholder:text-surface-500 focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        if (editName.trim() && editAddress.trim()) {
+                          updateServer(selectedServer.id, editName.trim(), editAddress.trim());
+                          updateServerPassword(selectedServer.id, editPassword.trim() || undefined);
+                          updateServerAdminToken(selectedServer.id, editAdminToken.trim() || undefined);
+                        }
+                        setEditingServer(false);
+                      }}
+                      disabled={!editName.trim() || !editAddress.trim()}
+                      className="flex-1 py-1.5 rounded-md text-xs font-medium bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                    >Save</button>
+                    <button
+                      onClick={() => setEditingServer(false)}
+                      className="px-3 py-1.5 rounded-md text-xs text-surface-400 hover:bg-surface-700 transition-colors"
+                    >Cancel</button>
+                  </div>
                 </div>
               ) : (
-                <button
-                  onClick={() => { setEditingAdminToken(true); setEditAdminToken(selectedServer.adminToken ?? ""); }}
-                  className="flex items-center gap-1.5 text-[10px] text-surface-500 hover:text-surface-300 transition-colors"
-                >
-                  <Shield className="w-3 h-3" />
-                  {selectedServer.adminToken ? "Change admin token" : "Set admin token"}
-                </button>
+                <div className="p-4 bg-surface-800/40 border border-surface-700 rounded-xl text-center relative group">
+                  <button
+                    onClick={() => {
+                      setEditName(selectedServer.name);
+                      setEditAddress(selectedServer.address);
+                      setEditPassword(selectedServer.password ?? "");
+                      setEditAdminToken(selectedServer.adminToken ?? "");
+                      setEditingServer(true);
+                    }}
+                    className="absolute top-2.5 right-2.5 p-1.5 rounded-md text-surface-600 hover:text-surface-300 hover:bg-surface-700 opacity-0 group-hover:opacity-100 transition-all"
+                    title="Edit server"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center mx-auto mb-2">
+                    <Server className="w-5 h-5 text-surface-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-surface-200">{selectedServer.name}</p>
+                  <p className="text-[10px] text-surface-500 mt-0.5">{selectedServer.address}</p>
+                  <div className="flex items-center justify-center gap-3 mt-2">
+                    {selectedServer.password && (
+                      <span className="flex items-center gap-1 text-[9px] text-surface-600">
+                        <Lock className="w-2.5 h-2.5" /> Password
+                      </span>
+                    )}
+                    {selectedServer.adminToken && (
+                      <span className="flex items-center gap-1 text-[9px] text-surface-600">
+                        <Shield className="w-2.5 h-2.5" /> Admin
+                      </span>
+                    )}
+                    {selectedServer.credential && (
+                      <span className="flex items-center gap-1 text-[9px] text-surface-600">
+                        <Ticket className="w-2.5 h-2.5" /> Invite
+                      </span>
+                    )}
+                  </div>
+                </div>
               )}
 
               <div>
