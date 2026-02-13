@@ -42,11 +42,18 @@ export function useVideo() {
       console.log("[video] new-producer from", data.userId, mediaType, data.producerId);
       producerMediaTypes.set(data.producerId, mediaType);
 
-      if (!mediaClientRef) return;
+      if (!mediaClientRef) {
+        console.warn("[video] mediaClientRef is null, cannot consume video producer");
+        return;
+      }
 
+      console.log("[video] Calling mediaClient.consume for", data.producerId);
       mediaClientRef.consume(data.producerId, data.userId).then((consumer) => {
+        console.log("[video] consume() resolved, consumer:", consumer ? consumer.id : "null", "track:", consumer?.track?.kind, consumer?.track?.readyState);
         if (!consumer) return;
-        // The MediaClient's onVideoConsumerCreated callback handles adding to the store
+        const stream = new MediaStream([consumer.track]);
+        useVideoStore.getState().addRemoteVideo(data.userId, mediaType, stream, consumer.id);
+        console.log("[video] Added remote video for", data.userId, mediaType, "consumerId:", consumer.id);
       }).catch((err) => {
         console.error("[video] Failed to consume video producer:", err);
       });
@@ -59,15 +66,6 @@ export function useVideo() {
       console.log("[video] producer-closed from", data.userId, mediaType);
       useVideoStore.getState().removeRemoteVideo(data.userId, mediaType);
     });
-
-    // Wire up the video consumer callback on the media client
-    if (mediaClientRef) {
-      mediaClientRef.setOnVideoConsumerCreated((userId, consumer, stream, _mediaType) => {
-        // Look up the actual mediaType from the producerId tracked via new-producer
-        const mt = producerMediaTypes.get(consumer.producerId) ?? "webcam";
-        useVideoStore.getState().addRemoteVideo(userId, mt, stream, consumer.id);
-      });
-    }
 
     return () => {
       unsubNewProducer();

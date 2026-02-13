@@ -62,6 +62,12 @@ export function useAudio() {
         setVideoMediaClient(mediaClient);
         await mediaClient.loadDevice(data.routerRtpCapabilities as any);
 
+        // Apply stored output device immediately
+        const storedOutputDevice = useSettingsStore.getState().outputDeviceId;
+        if (storedOutputDevice && storedOutputDevice !== "default") {
+          mediaClient.setOutputDevice(storedOutputDevice).catch(() => {});
+        }
+
         // Send our RTP capabilities to the server so it can create consumers for us
         if (mediaClient.rtpCapabilities) {
           signaling.send({ type: "rtp-capabilities", rtpCapabilities: mediaClient.rtpCapabilities });
@@ -156,6 +162,8 @@ export function useAudio() {
       const data = msg as ServerNewProducerMessage;
       const currentUserId = useServerStore.getState().userId;
       if (data.userId === currentUserId) return;
+      // Only handle mic producers — video producers are handled by useVideo
+      if (data.mediaType && data.mediaType !== "mic") return;
 
       console.log("[audio] new-producer from", data.userId, data.producerId, "ready:", mediaReady);
 

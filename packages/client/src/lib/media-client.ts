@@ -238,7 +238,7 @@ export class MediaClient {
             kind: result.kind,
             rtpParameters: result.rtpParameters as any,
           })
-          .then((consumer: Consumer) => {
+          .then(async (consumer: Consumer) => {
             this.consumers.set(consumer.id, consumer);
             console.log("[media] Consumer created, track:", consumer.track.kind, "readyState:", consumer.track.readyState, "paused:", consumer.paused);
 
@@ -263,6 +263,9 @@ export class MediaClient {
               resolve(consumer);
             } else {
               // Audio consumer — route through Web Audio GainNode
+              if (this.audioContext.state === "suspended") {
+                await this.audioContext.resume();
+              }
               const source = this.audioContext.createMediaStreamSource(stream);
               const gain = this.audioContext.createGain();
               const userVol = this.userVolumes.get(userId) ?? 1.0;
@@ -317,9 +320,17 @@ export class MediaClient {
 
   async setOutputDevice(deviceId: string): Promise<void> {
     this.outputDeviceId = deviceId;
+    console.log("[media] setOutputDevice:", deviceId);
     // Route AudioContext to the selected device (Chromium 110+)
     if (typeof (this.audioContext as any).setSinkId === "function") {
-      await (this.audioContext as any).setSinkId(deviceId).catch(() => {});
+      try {
+        await (this.audioContext as any).setSinkId(deviceId);
+        console.log("[media] AudioContext.setSinkId succeeded");
+      } catch (err) {
+        console.error("[media] AudioContext.setSinkId failed:", err);
+      }
+    } else {
+      console.warn("[media] AudioContext.setSinkId not available");
     }
     // Route all existing audio elements
     for (const audio of this.audioElements.values()) {

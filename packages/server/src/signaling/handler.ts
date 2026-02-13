@@ -94,7 +94,7 @@ const MSG_RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
   chat:     { max: 5,  windowMs: 1_000 },
   e2ee:     { max: 10, windowMs: 1_000 },
   speaking: { max: 20, windowMs: 1_000 },
-  media:    { max: 5,  windowMs: 1_000 },
+  media:    { max: 20, windowMs: 1_000 },
   general:  { max: 30, windowMs: 1_000 },
 };
 

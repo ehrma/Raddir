@@ -11,6 +11,20 @@ const IV_LENGTH = 12;
 const TAG_LENGTH = 128;
 
 let currentKey: CryptoKey | null = null;
+let encryptCount = 0;
+let decryptCount = 0;
+let encryptDropCount = 0;
+let decryptDropCount = 0;
+let decryptFailCount = 0;
+let lastLogTime = 0;
+
+function logFrameStats(): void {
+  const now = Date.now();
+  if (now - lastLogTime < 5000) return;
+  lastLogTime = now;
+  console.log(`[e2ee-frames] encrypt: ${encryptCount} ok, ${encryptDropCount} dropped | decrypt: ${decryptCount} ok, ${decryptDropCount} dropped, ${decryptFailCount} failed | key: ${currentKey ? 'set' : 'null'}`);
+  encryptCount = decryptCount = encryptDropCount = decryptDropCount = decryptFailCount = 0;
+}
 
 /**
  * Update the encryption key for all active frame transforms.
@@ -30,6 +44,8 @@ export function applyEncryptTransform(sender: RTCRtpSender, mediaKind: "audio" |
     async transform(encodedFrame: any, controller: any) {
       if (!currentKey) {
         // No key — drop frame to prevent sending unencrypted data
+        encryptDropCount++;
+        logFrameStats();
         return;
       }
       try {
@@ -53,8 +69,12 @@ export function applyEncryptTransform(sender: RTCRtpSender, mediaKind: "audio" |
 
         encodedFrame.data = newData;
         controller.enqueue(encodedFrame);
+        encryptCount++;
+        logFrameStats();
       } catch {
         // Encrypt failed — drop frame to prevent sending unencrypted
+        encryptDropCount++;
+        logFrameStats();
       }
     },
   });
@@ -71,12 +91,16 @@ export function applyDecryptTransform(receiver: RTCRtpReceiver, mediaKind: "audi
     async transform(encodedFrame: any, controller: any) {
       if (!currentKey) {
         // No key — drop frame to prevent playing garbage / unencrypted data
+        decryptDropCount++;
+        logFrameStats();
         return;
       }
       try {
         const data: ArrayBuffer = encodedFrame.data;
         if (data.byteLength <= unencryptedBytes + IV_LENGTH) {
           // Too short to be encrypted — drop
+          decryptDropCount++;
+          logFrameStats();
           return;
         }
 
@@ -98,8 +122,12 @@ export function applyDecryptTransform(receiver: RTCRtpReceiver, mediaKind: "audi
 
         encodedFrame.data = newData;
         controller.enqueue(encodedFrame);
+        decryptCount++;
+        logFrameStats();
       } catch {
         // Decrypt failed — drop frame to prevent garbage output
+        decryptFailCount++;
+        logFrameStats();
       }
     },
   });
