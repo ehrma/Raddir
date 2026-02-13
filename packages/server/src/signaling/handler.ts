@@ -150,6 +150,20 @@ async function handleAuth(
     user = createUser(msg.nickname, msg.publicKey);
   }
 
+  // Check ban before sending success or registering the session
+  if (isUserBanned(user.id, server.id)) {
+    send(ws, { type: "auth-result", success: false, error: "You are banned from this server" });
+    ws.close();
+    return { ws, userId: "", nickname: "", serverId: null, channelId: null, isMuted: false, isDeafened: false } as ConnectedClient;
+  }
+
+  // If this user already has an active session, clean up the old one first
+  const existing = clients.get(user.id);
+  if (existing && existing.ws !== ws) {
+    handleDisconnect(existing);
+    try { existing.ws.close(); } catch {}
+  }
+
   const client: ConnectedClient = {
     ws,
     userId: user.id,
@@ -168,13 +182,6 @@ async function handleAuth(
     success: true,
     userId: user.id,
   });
-
-  // Check if user is banned
-  if (isUserBanned(user.id, server.id)) {
-    send(ws, { type: "auth-result", success: false, error: "You are banned from this server" });
-    ws.close();
-    return client;
-  }
 
   const channels = ensureDefaultChannels(server.id);
   const roles = ensureDefaultRoles(server.id);

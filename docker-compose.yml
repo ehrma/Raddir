@@ -12,7 +12,7 @@ services:
     environment:
       - RADDIR_HOST=0.0.0.0
       - RADDIR_PORT=4000
-      - RADDIR_DB_PATH=/app/data/raddir.db
+      - RADDIR_DB_PATH=/data/raddir.db
       - RADDIR_RTC_MIN_PORT=40000
       - RADDIR_RTC_MAX_PORT=40100
       - RADDIR_ANNOUNCED_IP=${RADDIR_ANNOUNCED_IP:-}
@@ -25,7 +25,7 @@ services:
       - RADDIR_TLS_KEY=${RADDIR_TLS_KEY:-}
       - RADDIR_LOG_LEVEL=${RADDIR_LOG_LEVEL:-info}
     volumes:
-      - raddir-data:/app/data
+      - raddir-data:/data
     # Uncomment for better WebRTC UDP performance (replaces ports mapping):
     # network_mode: host
 

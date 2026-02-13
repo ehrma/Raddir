@@ -61,11 +61,14 @@ export function computeEffectivePermissions(
         return (roleB?.priority ?? 0) - (roleA?.priority ?? 0);
       });
 
-    for (const override of relevantOverrides) {
-      for (const key of PERMISSION_KEYS) {
+    // For each permission key, apply only the first non-inherit value
+    // (overrides are sorted highest priority first, so first match wins)
+    for (const key of PERMISSION_KEYS) {
+      for (const override of relevantOverrides) {
         const val = override.permissions[key];
         if (val && val !== "inherit") {
           effective[key] = val;
+          break;
         }
       }
     }

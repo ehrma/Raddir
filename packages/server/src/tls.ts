@@ -18,6 +18,7 @@ export interface TlsOptions {
   email?: string;
   certPath?: string;
   keyPath?: string;
+  announcedIp?: string;
 }
 
 /**
@@ -38,7 +39,7 @@ export async function getTlsConfig(opts: TlsOptions): Promise<TlsFiles> {
       return getLetsEncryptCert(opts);
     case "selfsigned":
     default:
-      return getSelfSignedCert(opts.dataDir);
+      return getSelfSignedCert(opts);
   }
 }
 
@@ -59,9 +60,9 @@ function getCustomCert(opts: TlsOptions): TlsFiles {
 
 // ── Self-signed ──────────────────────────────────────────────────────────────
 
-async function getSelfSignedCert(dataDir: string): Promise<TlsFiles> {
-  const certPath = resolve(dataDir, "tls-cert.pem");
-  const keyPath = resolve(dataDir, "tls-key.pem");
+async function getSelfSignedCert(opts: TlsOptions): Promise<TlsFiles> {
+  const certPath = resolve(opts.dataDir, "tls-cert.pem");
+  const keyPath = resolve(opts.dataDir, "tls-key.pem");
 
   if (existsSync(certPath) && existsSync(keyPath)) {
     console.log("[tls] Using existing self-signed certificate");
@@ -72,6 +73,26 @@ async function getSelfSignedCert(dataDir: string): Promise<TlsFiles> {
   }
 
   console.log("[tls] Generating self-signed certificate...");
+
+  // Build SANs: always include localhost defaults, plus configured domain/IP
+  const altNames: Array<{ type: 2; value: string } | { type: 7; ip: string }> = [
+    { type: 2, value: "localhost" },
+    { type: 7, ip: "127.0.0.1" },
+    { type: 7, ip: "::1" },
+  ];
+
+  if (opts.domain) {
+    altNames.push({ type: 2, value: opts.domain });
+  }
+
+  if (opts.announcedIp && opts.announcedIp !== "127.0.0.1") {
+    // Check if it looks like an IP address or a hostname
+    if (/^[\d.]+$/.test(opts.announcedIp) || opts.announcedIp.includes(":")) {
+      altNames.push({ type: 7, ip: opts.announcedIp });
+    } else {
+      altNames.push({ type: 2, value: opts.announcedIp });
+    }
+  }
 
   const now = new Date();
   const expiry = new Date(now);
@@ -86,20 +107,13 @@ async function getSelfSignedCert(dataDir: string): Promise<TlsFiles> {
       { name: "basicConstraints", cA: false },
       { name: "keyUsage", digitalSignature: true, keyEncipherment: true },
       { name: "extKeyUsage", serverAuth: true },
-      {
-        name: "subjectAltName",
-        altNames: [
-          { type: 2, value: "localhost" },
-          { type: 7, ip: "127.0.0.1" },
-          { type: 7, ip: "::1" },
-        ],
-      },
+      { name: "subjectAltName", altNames },
     ],
   });
 
   writeFileSync(certPath, pems.cert, "utf-8");
   writeFileSync(keyPath, pems.private, "utf-8");
-  console.log("[tls] Self-signed certificate generated and saved");
+  console.log(`[tls] Self-signed certificate generated with SANs: ${altNames.map(a => "value" in a ? a.value : a.ip).join(", ")}`);
 
   return { cert: pems.cert, key: pems.private };
 }

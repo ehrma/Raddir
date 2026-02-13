@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     email: config.tlsEmail || undefined,
     certPath: config.tlsCert || undefined,
     keyPath: config.tlsKey || undefined,
+    announcedIp: config.announcedIp || undefined,
   };
   console.log(`[raddir] TLS mode: ${tlsOpts.mode}`);
   const tls = await getTlsConfig(tlsOpts);

@@ -129,7 +129,7 @@ services:
     environment:
       - RADDIR_HOST=0.0.0.0
       - RADDIR_PORT=4000
-      - RADDIR_DB_PATH=/app/data/raddir.db
+      - RADDIR_DB_PATH=/data/raddir.db
       - RADDIR_RTC_MIN_PORT=40000
       - RADDIR_RTC_MAX_PORT=40100
       - RADDIR_ANNOUNCED_IP=       # Set to your server's public IP
@@ -138,7 +138,7 @@ services:
       - RADDIR_TLS_MODE=selfsigned
       - RADDIR_LOG_LEVEL=info
     volumes:
-      - raddir-data:/app/data
+      - raddir-data:/data
 
 volumes:
   raddir-data:
