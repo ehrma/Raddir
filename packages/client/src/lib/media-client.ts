@@ -6,6 +6,7 @@ import type {
   ServerProducedMessage,
   ServerConsumeResultMessage,
 } from "@raddir/shared";
+import { applyEncryptTransform, applyDecryptTransform } from "./e2ee/frame-crypto";
 
 export class MediaClient {
   private device: Device;
@@ -115,6 +116,12 @@ export class MediaClient {
       encodings: [{ maxBitrate: 128000 }],
     });
 
+    // Apply E2EE encrypt transform to outgoing audio frames
+    const sender = this.producer.rtpSender;
+    if (sender) {
+      applyEncryptTransform(sender);
+    }
+
     this.producer.on("transportclose", () => {
       console.log("[media] Producer transport closed");
       this.producer = null;
@@ -146,6 +153,12 @@ export class MediaClient {
           .then((consumer: Consumer) => {
             this.consumers.set(consumer.id, consumer);
             console.log("[media] Consumer created, track:", consumer.track.kind, "readyState:", consumer.track.readyState, "paused:", consumer.paused);
+
+            // Apply E2EE decrypt transform to incoming audio frames
+            const receiver = consumer.rtpReceiver;
+            if (receiver) {
+              applyDecryptTransform(receiver);
+            }
 
             // Route through Web Audio GainNode for volume boost beyond 100%
             const stream = new MediaStream([consumer.track]);

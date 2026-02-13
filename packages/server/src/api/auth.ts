@@ -1,19 +1,27 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 
 let adminToken = "";
+let openAdmin = false;
 
 export function setAdminToken(token: string): void {
   adminToken = token;
 }
 
+export function setOpenAdmin(open: boolean): void {
+  openAdmin = open;
+}
+
 /**
  * Fastify preHandler that requires a valid admin token in the Authorization header.
- * If no admin token is configured on the server, all requests are allowed (open server).
+ * If no admin token is configured:
+ *   - If RADDIR_OPEN_ADMIN=true, all requests are allowed (explicit opt-in).
+ *   - Otherwise, all admin requests are blocked.
  * Usage: { preHandler: requireAdmin }
  */
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (!adminToken) {
-    // No admin token configured — allow all requests (open server)
+    if (openAdmin) return;
+    reply.code(403).send({ error: "Admin token not configured. Set RADDIR_ADMIN_TOKEN or enable RADDIR_OPEN_ADMIN=true" });
     return;
   }
 

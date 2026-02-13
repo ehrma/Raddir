@@ -5,7 +5,7 @@ import { Send, Lock, ShieldAlert } from "lucide-react";
 import {
   encryptFrame,
   decryptFrame,
-  generateIV,
+  generateRandomIV,
   arrayBufferToBase64,
   base64ToArrayBuffer,
 } from "../lib/e2ee/crypto";
@@ -25,7 +25,6 @@ export function TextChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const frameCounterRef = useRef(0);
 
   // Sync displayed messages when channel changes
   useEffect(() => {
@@ -55,7 +54,7 @@ export function TextChat() {
     let iv: string;
 
     if (channelKey) {
-      const ivBytes = generateIV(frameCounterRef.current++, 0);
+      const ivBytes = generateRandomIV();
       const encrypted = await encryptFrame(channelKey, plaintext.buffer as ArrayBuffer, ivBytes);
       ciphertext = arrayBufferToBase64(encrypted);
       iv = arrayBufferToBase64(ivBytes.buffer as ArrayBuffer);

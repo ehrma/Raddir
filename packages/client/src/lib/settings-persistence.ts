@@ -27,7 +27,8 @@ async function encrypt(value: string | undefined): Promise<string | undefined> {
     const encrypted = await (window as any).raddir?.encryptString(value);
     if (encrypted) return ENCRYPTED_PREFIX + encrypted;
   } catch {}
-  return value; // fallback to plaintext if safeStorage unavailable
+  // safeStorage unavailable — refuse to persist secret in plaintext
+  return undefined;
 }
 
 async function decrypt(value: string | undefined): Promise<string | undefined> {

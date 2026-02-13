@@ -127,6 +127,72 @@ export function getStoredIdentityPublicKey(): string | null {
   return stored?.publicKey ?? null;
 }
 
+function getSignAlgorithm(algorithm: string): AlgorithmIdentifier | EcdsaParams {
+  if (algorithm === "ECDSA-P256") {
+    return { name: "ECDSA", hash: "SHA-256" };
+  }
+  return { name: "Ed25519" } as any;
+}
+
+/**
+ * Sign arbitrary data with the identity private key.
+ * Returns the signature as a base64 string.
+ */
+export async function signData(data: string): Promise<string | null> {
+  try {
+    const identity = await getOrCreateIdentity();
+    const algo = loadStoredIdentity()?.algorithm ?? "Ed25519";
+    const encoded = new TextEncoder().encode(data);
+    const signature = await crypto.subtle.sign(
+      getSignAlgorithm(algo),
+      identity.keyPair.privateKey,
+      encoded
+    );
+    return arrayBufferToBase64(signature);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verify a signature against data using a public key (SPKI hex).
+ */
+export async function verifySignature(
+  data: string,
+  signatureBase64: string,
+  publicKeyHex: string,
+  algorithm?: string
+): Promise<boolean> {
+  try {
+    const algo = algorithm ?? loadStoredIdentity()?.algorithm ?? "Ed25519";
+    const publicKey = await importPublicKey(publicKeyHex, algo);
+    const encoded = new TextEncoder().encode(data);
+    const signature = base64ToArrayBuffer(signatureBase64);
+    return crypto.subtle.verify(
+      getSignAlgorithm(algo),
+      publicKey,
+      signature,
+      encoded
+    );
+  } catch {
+    return false;
+  }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
 // ─── Identity Export / Import (passphrase-encrypted) ─────────────────────────
 
 async function deriveKeyFromPassphrase(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {

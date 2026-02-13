@@ -14,7 +14,7 @@ import { inviteRoutes } from "./api/routes/invites.js";
 import { roleRoutes } from "./api/routes/roles.js";
 import { getTlsConfig, scheduleRenewal, type TlsMode, type TlsOptions } from "./tls.js";
 import cors from "@fastify/cors";
-import { setAdminToken } from "./api/auth.js";
+import { setAdminToken, setOpenAdmin } from "./api/auth.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -26,6 +26,12 @@ async function main(): Promise<void> {
 
   // Set admin token for REST API authentication
   setAdminToken(config.adminToken);
+  setOpenAdmin(config.openAdmin);
+  if (!config.adminToken && config.openAdmin) {
+    console.warn("[raddir] WARNING: RADDIR_OPEN_ADMIN is enabled — admin API is open to all requests");
+  } else if (!config.adminToken && !config.openAdmin) {
+    console.warn("[raddir] No RADDIR_ADMIN_TOKEN set — admin API is locked. Set a token or RADDIR_OPEN_ADMIN=true");
+  }
 
   // Initialize database
   initDb(config.dbPath);

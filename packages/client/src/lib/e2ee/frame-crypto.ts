@@ -1,105 +1,92 @@
-import { encryptFrame, decryptFrame, generateIV } from "./crypto";
+import { exportKey } from "./crypto";
 
-const UNENCRYPTED_BYTES = 1;
-
+// Ports to all active e2ee workers (so we can broadcast key updates)
+const activePorts: MessagePort[] = [];
 let currentKey: CryptoKey | null = null;
-let senderId = 0;
-let frameCounter = 0;
 
-export function setFrameEncryptionKey(key: CryptoKey | null): void {
+/**
+ * Check if the browser/Electron supports RTCRtpScriptTransform.
+ */
+export function supportsEncodedTransform(): boolean {
+  return typeof (globalThis as any).RTCRtpScriptTransform === "function";
+}
+
+/**
+ * Update the encryption key for all active frame transforms.
+ * Called from the main thread when the channel key changes.
+ */
+export async function setFrameEncryptionKey(key: CryptoKey | null): Promise<void> {
   currentKey = key;
-}
-
-export function setSenderId(id: number): void {
-  senderId = id;
-}
-
-export function createEncryptTransform(): TransformStream {
-  return new TransformStream({
-    async transform(encodedFrame: RTCEncodedAudioFrame, controller: TransformStreamDefaultController) {
-      if (!currentKey) {
-        controller.enqueue(encodedFrame);
-        return;
-      }
-
-      try {
-        const data = encodedFrame.data;
-        const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
-        const payload = data.slice(UNENCRYPTED_BYTES);
-
-        const iv = generateIV(frameCounter++, senderId);
-        const encrypted = await encryptFrame(currentKey, payload, iv);
-
-        const newData = new ArrayBuffer(
-          UNENCRYPTED_BYTES + iv.byteLength + encrypted.byteLength
-        );
-        const newView = new Uint8Array(newData);
-        newView.set(header, 0);
-        newView.set(iv, UNENCRYPTED_BYTES);
-        newView.set(new Uint8Array(encrypted), UNENCRYPTED_BYTES + iv.byteLength);
-
-        encodedFrame.data = newData;
-        controller.enqueue(encodedFrame);
-      } catch (err) {
-        console.error("[e2ee] Encrypt error:", err);
-        controller.enqueue(encodedFrame);
-      }
-    },
-  });
-}
-
-export function createDecryptTransform(): TransformStream {
-  return new TransformStream({
-    async transform(encodedFrame: RTCEncodedAudioFrame, controller: TransformStreamDefaultController) {
-      if (!currentKey) {
-        controller.enqueue(encodedFrame);
-        return;
-      }
-
-      try {
-        const data = encodedFrame.data;
-        if (data.byteLength <= UNENCRYPTED_BYTES + 12) {
-          controller.enqueue(encodedFrame);
-          return;
-        }
-
-        const header = new Uint8Array(data, 0, UNENCRYPTED_BYTES);
-        const iv = new Uint8Array(data, UNENCRYPTED_BYTES, 12);
-        const encrypted = data.slice(UNENCRYPTED_BYTES + 12);
-
-        const decrypted = await decryptFrame(currentKey, encrypted, iv);
-
-        const newData = new ArrayBuffer(UNENCRYPTED_BYTES + decrypted.byteLength);
-        const newView = new Uint8Array(newData);
-        newView.set(header, 0);
-        newView.set(new Uint8Array(decrypted), UNENCRYPTED_BYTES);
-
-        encodedFrame.data = newData;
-        controller.enqueue(encodedFrame);
-      } catch {
-        controller.enqueue(encodedFrame);
-      }
-    },
-  });
-}
-
-export function applyInsertableStreams(
-  sender: RTCRtpSender | null,
-  receiver: RTCRtpReceiver | null
-): void {
-  if (sender && "createEncodedStreams" in sender) {
-    const senderStreams = (sender as any).createEncodedStreams();
-    const encryptTransform = createEncryptTransform();
-    senderStreams.readable
-      .pipeThrough(encryptTransform)
-      .pipeTo(senderStreams.writable);
+  if (!key) {
+    for (const port of activePorts) {
+      port.postMessage({ type: "clearKey" });
+    }
+    return;
   }
-
-  if (receiver && "createEncodedStreams" in receiver) {
-    const receiverStreams = (receiver as any).createEncodedStreams();
-    const decryptTransform = createDecryptTransform();
-    receiverStreams.readable
-      .pipeThrough(decryptTransform)
-      .pipeTo(receiverStreams.writable);
+  const raw = await exportKey(key);
+  for (const port of activePorts) {
+    port.postMessage({ type: "setKey", key: raw }, [raw.slice(0)]);
   }
+}
+
+/**
+ * Apply an RTCRtpScriptTransform to a sender (encrypt) or receiver (decrypt).
+ * Creates a dedicated Worker and MessageChannel for each transform.
+ */
+export function applyEncryptTransform(sender: RTCRtpSender): void {
+  if (!supportsEncodedTransform()) return;
+
+  const worker = new Worker("/e2ee-worker.js");
+  const channel = new MessageChannel();
+  activePorts.push(channel.port1);
+
+  const transform = new (globalThis as any).RTCRtpScriptTransform(
+    worker,
+    { name: "encrypt", port: channel.port2 },
+    [channel.port2]
+  );
+  (sender as any).transform = transform;
+
+  // Send current key immediately if available
+  if (currentKey) {
+    exportKey(currentKey).then((raw) => {
+      channel.port1.postMessage({ type: "setKey", key: raw }, [raw]);
+    });
+  }
+  channel.port1.start();
+}
+
+export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
+  if (!supportsEncodedTransform()) return;
+
+  const worker = new Worker("/e2ee-worker.js");
+  const channel = new MessageChannel();
+  activePorts.push(channel.port1);
+
+  const transform = new (globalThis as any).RTCRtpScriptTransform(
+    worker,
+    { name: "decrypt", port: channel.port2 },
+    [channel.port2]
+  );
+  (receiver as any).transform = transform;
+
+  // Send current key immediately if available
+  if (currentKey) {
+    exportKey(currentKey).then((raw) => {
+      channel.port1.postMessage({ type: "setKey", key: raw }, [raw]);
+    });
+  }
+  channel.port1.start();
+}
+
+/**
+ * Clean up all active worker ports.
+ */
+export function resetFrameCrypto(): void {
+  for (const port of activePorts) {
+    port.postMessage({ type: "clearKey" });
+    port.close();
+  }
+  activePorts.length = 0;
+  currentKey = null;
 }

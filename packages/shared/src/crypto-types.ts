@@ -2,6 +2,7 @@ export interface E2EEPublicKeyAnnounce {
   kind: "public-key-announce";
   ecdhPublicKey: string;
   identityPublicKey?: string;
+  signature?: string;
   targetUserId?: string;
 }
 
@@ -11,6 +12,7 @@ export interface E2EEEncryptedChannelKey {
   encryptedKey: string;
   senderEcdhPublicKey: string;
   keyEpoch: number;
+  signature?: string;
 }
 
 export interface E2EEKeyRatchet {

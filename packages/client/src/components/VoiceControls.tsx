@@ -3,13 +3,13 @@ import { useVoiceStore } from "../stores/voiceStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useConnection } from "../hooks/useConnection";
 import { usePermissions } from "../hooks/usePermissions";
-import { Mic, MicOff, Headphones, HeadphoneOff, LogOut, Shield, Settings, ShieldCheck } from "lucide-react";
+import { Mic, MicOff, Headphones, HeadphoneOff, LogOut, Shield, ShieldOff, Settings, ShieldCheck } from "lucide-react";
 import { cn } from "../lib/cn";
 import { SettingsPanel } from "./Settings/SettingsPanel";
 import { AdminPanel } from "./AdminPanel";
 
 export function VoiceControls() {
-  const { isMuted, isDeafened, toggleMute, toggleDeafen } = useVoiceStore();
+  const { isMuted, isDeafened, toggleMute, toggleDeafen, e2eeActive, keyEpoch } = useVoiceStore();
   const nickname = useSettingsStore((s) => s.nickname);
   const { disconnect } = useConnection();
   const { isAdmin } = usePermissions();
@@ -28,9 +28,9 @@ export function VoiceControls() {
             <p className="text-xs font-medium text-surface-200 truncate">
               {nickname}
             </p>
-            <p className="text-[10px] text-surface-500 flex items-center gap-1">
-              <Shield className="w-2.5 h-2.5" />
-              E2E Encrypted
+            <p className={cn("text-[10px] flex items-center gap-1", e2eeActive ? "text-green-500" : "text-yellow-500")}>
+              {e2eeActive ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
+              {e2eeActive ? `E2EE Active (epoch ${keyEpoch})` : "E2EE Inactive"}
             </p>
           </div>
           {isAdmin && (

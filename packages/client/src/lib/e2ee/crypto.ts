@@ -29,8 +29,14 @@ export function generateIV(frameCounter: number, senderId: number): Uint8Array {
   const iv = new Uint8Array(IV_LENGTH);
   const view = new DataView(iv.buffer);
   view.setUint32(0, senderId, true);
-  view.setFloat64(4, frameCounter, true);
+  // Pack counter as two uint32s (low + high) instead of Float64 to avoid precision issues
+  view.setUint32(4, frameCounter >>> 0, true);
+  view.setUint32(8, (frameCounter / 0x100000000) >>> 0, true);
   return iv;
+}
+
+export function generateRandomIV(): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 }
 
 export async function encryptFrame(

@@ -6,7 +6,7 @@ import { getSignalingClient, getKeyManager } from "./useConnection";
 import { MediaClient } from "../lib/media-client";
 import { VoiceActivityDetector } from "../lib/audio/vad";
 import { playJoinSound, playLeaveSound, playMuteSound, playUnmuteSound } from "../lib/audio/sounds";
-import { setFrameEncryptionKey } from "../lib/e2ee/frame-crypto";
+import { setFrameEncryptionKey, resetFrameCrypto } from "../lib/e2ee/frame-crypto";
 import { setActiveMediaClient } from "../lib/audio/audio-bridge";
 import type { ServerJoinedChannelMessage, ServerNewProducerMessage } from "@raddir/shared";
 
@@ -65,15 +65,21 @@ export function useAudio() {
           signaling.send({ type: "rtp-capabilities", rtpCapabilities: mediaClient.rtpCapabilities });
         }
 
-        // Wire E2EE key to frame encryption
+        // Wire E2EE key to frame encryption and track active state
         const km = getKeyManager();
         if (km) {
           const key = km.getChannelKey();
           setFrameEncryptionKey(key);
-          km.setOnKeyChanged((newKey, _epoch) => {
+          useVoiceStore.getState().setE2eeActive(!!key, km.getKeyEpoch());
+          km.setOnKeyChanged((newKey, epoch) => {
             setFrameEncryptionKey(newKey);
+            useVoiceStore.getState().setE2eeActive(!!newKey, epoch);
           });
           km.announcePublicKey();
+
+          // Deterministic key holder election: lowest userId becomes key holder
+          const memberIds = (data.users ?? []).map((u: any) => u.id).concat(currentUserId!);
+          await km.electKeyHolder(currentUserId!, memberIds);
         }
 
         // Capture mic
@@ -369,5 +375,5 @@ function cleanupAudio(): void {
     audioContext = null;
   }
 
-  setFrameEncryptionKey(null);
+  resetFrameCrypto();
 }
