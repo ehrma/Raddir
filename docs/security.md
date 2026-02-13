@@ -4,7 +4,7 @@ This document describes exactly what Raddir encrypts, what the server can and ca
 
 ## Encryption Layers
 
-Raddir uses **two layers** of encryption for voice and text:
+Raddir uses **two layers** of encryption for voice, video, and text:
 
 ### Layer 1: Transport Encryption (always on)
 
@@ -186,6 +186,32 @@ Origins are restricted to Electron (`null`, `file://`, `app://`) and `localhost`
 ### Admin Privileges
 
 Admin token grants **ephemeral** privileges for the WebSocket session only — not persisted as a database role. When the session ends, admin access is gone. This limits the impact of a leaked token.
+
+### Live Permission Broadcasting
+
+When an admin modifies a role's permissions, deletes a role, or changes a channel permission override, the server immediately recomputes effective permissions for every connected client who holds that role and pushes a `permissions-updated` message. This ensures:
+
+- Permission changes take effect **instantly** without requiring clients to reconnect
+- The client UI updates in real time (e.g., video buttons become disabled/enabled)
+- Admin token holders still receive all-allow permissions regardless of role changes
+
+The same mechanism fires when a role is assigned or unassigned from a user via the admin panel.
+
+### Server-Side Permission Enforcement on Media
+
+The server enforces permissions at the `produce` handler level — not just in the client UI:
+
+| Media type | Required permission | Enforcement |
+|---|---|---|
+| Microphone | `speak` | Server rejects `produce` with `NO_PERMISSION` if denied |
+| Webcam | `video` | Server rejects `produce` with `NO_PERMISSION` if denied |
+| Screen share | `screenShare` | Server rejects `produce` with `NO_PERMISSION` if denied |
+| Move user | `moveUsers` | Server rejects `move-user` with `NO_PERMISSION` if denied |
+| Kick | `kick` | Server rejects `kick` with `NO_PERMISSION` if denied |
+| Ban | `ban` | Server rejects `ban` with `NO_PERMISSION` if denied |
+| Role management | `manageRoles` | Server rejects `assign-role` with `NO_PERMISSION` if denied |
+
+Client-side UI gating (disabled buttons, tooltips) is a UX convenience. The server is the **sole authority** — a modified client cannot bypass permission checks.
 
 ### Invite System Hardening
 

@@ -17,8 +17,8 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Speaking indicators** — Green ring on avatars for yourself and other users
 
 ### Video & Screen Share
-- **Webcam support** — Configurable resolution (480p/720p/1080p), fps, and bitrate via settings; permission-gated per role
-- **Screen sharing** — Share entire screen or individual window via native OS picker
+- **Webcam support** — Configurable resolution (480p/720p/1080p), fps (5–60), and bitrate (500–6000 kbps) via video settings tab; permission-gated per role
+- **Screen sharing** — Share entire screen or individual window via native OS picker; configurable fps (1–60) and bitrate (1000–8000 kbps)
 - **E2EE video** — Same AES-256-GCM Insertable Streams pipeline as voice; all simulcast layers encrypted; server cannot decode video frames
 - **Simulcast** — 3-layer webcam (quarter/half/full resolution), 2-layer screen share; viewers receive low quality in grid, high quality when maximized
 - **Producer limits** — Server-configurable max concurrent webcams (default 5) and screen shares (default 1) per channel; enforced server-side
@@ -29,7 +29,7 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **End-to-end encrypted voice** — AES-256-GCM via Insertable Streams; server is cryptographically blind
 - **End-to-end encrypted video** — Same Insertable Streams E2EE as voice; webcam and screen share frames are AES-256-GCM encrypted
 - **End-to-end encrypted text chat** — Messages encrypted client-side before transmission
-- **Persistent identity keys** — Ed25519 (with ECDSA P-256 browser fallback), device-bound keypair
+- **Persistent identity keys** — ECDSA P-256, device-bound keypair stored via Electron `safeStorage`
 - **User verification** — Signal-style safety numbers and fingerprints; verified users show a badge
 - **Identity export/import** — Backup your identity as a passphrase-encrypted file (PBKDF2 + AES-256-GCM)
 - **ECDH P-256 key exchange** — Per-channel shared secrets derived via HKDF
@@ -46,13 +46,16 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Invite system** — Admins generate invite codes that encode the server address (routing hint) and a token into a shareable blob. Recipients paste the code on the connect screen to redeem an **unbound** session credential — no identity key is needed at this stage. The server password is **never** included
 - **Session credentials** — On first WebSocket connect, the credential is **bound** to the user's public key. Subsequent connections must present the same key. Credentials can be revoked server-side
 - **Encrypted credential storage** — Passwords, admin tokens, and session credentials are encrypted at rest using Electron's OS-level `safeStorage` API (DPAPI on Windows, Keychain on macOS, libsecret on Linux). Falls back to plaintext in browser mode
-- **Rate limiting** — IP-based sliding-window rate limiting on WebSocket auth and public invite endpoints
+- **Rate limiting** — IP-based sliding-window rate limiting on WebSocket auth and public invite endpoints; per-connection post-auth signaling rate limits by message category
 - **CORS policy** — Restricted to Electron (`file://`, `app://`) and localhost dev origins
 - **Server customization** — Set a custom server name, description, and icon via the admin panel; changes broadcast live to all connected clients
 - **Role-based permissions** — Admin, Member, Guest roles with granular permission control and role colors
+- **Live permission updates** — Role and channel override changes take effect immediately for all connected clients without reconnecting
+- **Permission-gated UI** — Buttons for restricted actions (video, screen share) show as disabled with a tooltip explaining the missing permission
 - **Channel permission overrides** — Per-channel permission tweaks per role
 - **Effective permissions viewer** — See computed permissions for any user
-- **Admin panel** — General settings, channels, users (kick/ban/role assignment), invite codes, roles, overrides, and effective permissions
+- **Admin panel** — General settings, channels, users (kick/ban/move/role assignment), invite codes, roles, overrides, and effective permissions
+- **Move users** — Admins can move users between channels (requires `moveUsers` permission)
 - **Ban system** — Ban users by identity; persisted across reconnects
 
 ### Client
@@ -66,7 +69,7 @@ Raddir is a TeamSpeak-inspired voice communication platform with true end-to-end
 - **Your identity card** — Click yourself to see your fingerprint with a copy button
 - **E2EE text chat** — Per-channel encrypted chat with in-memory message history across channel switches
 - **User avatars** — Upload a profile picture from settings; displayed in channel tree, user list, and chat messages (rounded, with speaking glow)
-- **Settings panel** — Profile, audio, keybinds, appearance, and identity tabs
+- **Settings panel** — Profile, audio, video, keybinds, appearance, and identity tabs
 - **Identity management** — View fingerprint, export/import encrypted identity backup, manage verified users
 - **Join/leave sounds** — Audio cues when users enter or leave channels
 - **Reconnect overlay** — Automatic reconnection handling with visual feedback
