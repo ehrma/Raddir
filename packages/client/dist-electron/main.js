@@ -1,7 +1,7 @@
-import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, safeStorage, nativeTheme } from "electron";
+import { app, nativeImage, Tray, Menu, BrowserWindow, globalShortcut, ipcMain, session, safeStorage, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, existsSync, unlinkSync, readFileSync, mkdirSync } from "node:fs";
 import { createSign, createPrivateKey, generateKeyPairSync } from "node:crypto";
 const __filename$1 = fileURLToPath(import.meta.url);
 const __dirname$1 = dirname(__filename$1);
@@ -94,6 +94,18 @@ ipcMain.handle("unregister-ptt-key", () => {
 });
 ipcMain.handle("trust-server-host", (_event, host) => {
   trustedServerHost = host || null;
+  if (trustedServerHost) {
+    const trustedHostname = trustedServerHost.split(":")[0];
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      if (request.hostname === trustedHostname) {
+        callback(0);
+        return;
+      }
+      callback(-3);
+    });
+  } else {
+    session.defaultSession.setCertificateVerifyProc(null);
+  }
 });
 ipcMain.handle("safe-storage-encrypt", (_event, plaintext) => {
   if (!safeStorage.isEncryptionAvailable()) return null;
@@ -163,6 +175,13 @@ ipcMain.handle("identity-sign", (_event, data) => {
   const key = createPrivateKey(id.privateKeyPem);
   const sig = signer.sign({ key, dsaEncoding: "ieee-p1363" });
   return sig.toString("base64");
+});
+ipcMain.handle("identity-regenerate", () => {
+  const filePath = getIdentityFilePath();
+  if (existsSync(filePath)) unlinkSync(filePath);
+  cachedIdentity = null;
+  const newId = generateAndStoreIdentity();
+  return newId.publicKeyHex;
 });
 ipcMain.handle("identity-export", (_event, passphrase) => {
   const id = loadIdentity();

@@ -5,6 +5,7 @@
 const raddir = (window as any).raddir as {
   identityGetPublicKey: () => Promise<string>;
   identitySign: (data: string) => Promise<string>;
+  identityRegenerate: () => Promise<string>;
   identityExport: (passphrase: string) => Promise<string | null>;
   identityImportEncrypted: (file: string, passphrase: string) => Promise<{ success: boolean; error?: string }>;
   identityPinCheck: (serverId: string, userId: string, identityPublicKeyHex: string) => Promise<"new" | "ok" | "mismatch">;
@@ -112,7 +113,10 @@ export async function computeSafetyNumber(
  * Format: "ABCD EF01 2345 6789" — the first 16 hex chars in groups of 4.
  */
 export function computeFingerprint(publicKey: string): string {
-  return publicKey.slice(0, 16).toUpperCase().match(/.{1,4}/g)?.join(" ") ?? "";
+  // P-256 SPKI hex: 52 chars fixed header + "04" uncompressed prefix = 54 chars before unique EC point
+  const SPKI_P256_PREFIX_LEN = 54;
+  const uniquePart = publicKey.length > SPKI_P256_PREFIX_LEN ? publicKey.slice(SPKI_P256_PREFIX_LEN) : publicKey;
+  return uniquePart.slice(0, 16).toUpperCase().match(/.{1,4}/g)?.join(" ") ?? "";
 }
 
 // ─── Identity Export / Import (passphrase-encrypted, main process) ───────────
@@ -128,9 +132,8 @@ export async function importIdentity(fileContents: string, passphrase: string): 
   if (!result.success) throw new Error(result.error ?? "Import failed");
 }
 
-export function clearIdentity(): void {
-  // No-op: identity is managed by the main process.
-  // A future "rotate identity" IPC could be added here.
+export async function clearIdentity(): Promise<string> {
+  return raddir.identityRegenerate();
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────

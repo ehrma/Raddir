@@ -15,7 +15,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="w-full max-w-2xl bg-surface-900 rounded-xl border border-surface-700 shadow-2xl overflow-hidden">
+      <div className="w-full max-w-4xl max-h-[85vh] bg-surface-900 rounded-xl border border-surface-700 shadow-2xl overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-surface-800">
           <h2 className="text-sm font-semibold text-surface-200 flex items-center gap-2">
             <Shield className="w-4 h-4 text-accent" /> Server Admin
@@ -25,8 +25,8 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="flex">
-          <div className="w-36 border-r border-surface-800 p-2 space-y-0.5">
+        <div className="flex flex-1 min-h-0">
+          <div className="w-36 border-r border-surface-800 p-2 space-y-0.5 flex-shrink-0">
             {(["channels", "users", "invites", "roles", "overrides", "perms"] as const).map((t) => (
               <button
                 key={t}
@@ -41,7 +41,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
             ))}
           </div>
 
-          <div className="flex-1 p-4 min-h-[350px] overflow-y-auto">
+          <div className="flex-1 p-4 min-h-[500px] overflow-y-auto">
             {tab === "channels" && <ChannelAdmin />}
             {tab === "users" && <UserAdmin />}
             {tab === "invites" && <InviteAdmin />}
@@ -70,9 +70,9 @@ function ChannelAdmin() {
         body: JSON.stringify({ name: newName.trim() }),
       });
       if (res.ok) {
-        const ch = await res.json();
-        useServerStore.setState((s) => ({ channels: [...s.channels, ch] }));
         setNewName("");
+      } else {
+        console.error("[admin] Failed to create channel:", res.status, await res.text());
       }
     } catch (err) {
       console.error("[admin] Failed to create channel:", err);
@@ -82,9 +82,17 @@ function ChannelAdmin() {
 
   const handleDelete = async (channelId: string) => {
     try {
-      const res = await fetch(`${getApiBase()}/api/channels/${channelId}`, { method: "DELETE", headers: getAuthHeaders() });
+      const { savedServers, serverUrl } = useSettingsStore.getState();
+      const server = savedServers.find((s) => s.address === serverUrl);
+      const deleteHeaders: Record<string, string> = {};
+      if (server?.adminToken) deleteHeaders["Authorization"] = `Bearer ${server.adminToken}`;
+      const res = await fetch(`${getApiBase()}/api/channels/${channelId}`, { method: "DELETE", headers: deleteHeaders });
       if (res.ok) {
+        // Update locally immediately; the channel-deleted broadcast will also fire
+        // but the filter is idempotent so double-removal is safe
         useServerStore.setState((s) => ({ channels: s.channels.filter((c) => c.id !== channelId) }));
+      } else {
+        console.error("[admin] Failed to delete channel:", res.status, await res.text());
       }
     } catch (err) {
       console.error("[admin] Failed to delete channel:", err);
@@ -176,54 +184,57 @@ function UserAdmin() {
             <span className="text-[10px] text-surface-600">
               {m.channelId ? "in channel" : "idle"}
             </span>
-            {m.userId !== userId && (
-              <div className="hidden group-hover:flex items-center gap-1">
-                {can("manageRoles") && (
-                  <button
-                    onClick={() => setExpandedUser(expandedUser === m.userId ? null : m.userId)}
-                    className="flex items-center gap-1 px-2 py-1 text-[10px] text-accent bg-accent/10 rounded hover:bg-accent/20 transition-colors"
-                  >
-                    <Shield className="w-3 h-3" /> Roles
-                  </button>
-                )}
-                {can("kick") && (
-                  <button
-                    onClick={() => handleKick(m.userId)}
-                    className="flex items-center gap-1 px-2 py-1 text-[10px] text-orange-400 bg-orange-400/10 rounded hover:bg-orange-400/20 transition-colors"
-                  >
-                    <Ban className="w-3 h-3" /> Kick
-                  </button>
-                )}
-                {can("ban") && (
-                  <button
-                    onClick={() => handleBan(m.userId)}
-                    className="flex items-center gap-1 px-2 py-1 text-[10px] text-red-400 bg-red-400/10 rounded hover:bg-red-400/20 transition-colors"
-                  >
-                    <Ban className="w-3 h-3" /> Ban
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="flex items-center gap-1">
+              {can("manageRoles") && (
+                <button
+                  onClick={() => setExpandedUser(expandedUser === m.userId ? null : m.userId)}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-accent bg-accent/10 rounded hover:bg-accent/20 transition-colors"
+                >
+                  <Shield className="w-3 h-3" /> Roles
+                </button>
+              )}
+              {m.userId !== userId && can("kick") && (
+                <button
+                  onClick={() => handleKick(m.userId)}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-orange-400 bg-orange-400/10 rounded hover:bg-orange-400/20 transition-colors"
+                >
+                  <Ban className="w-3 h-3" /> Kick
+                </button>
+              )}
+              {m.userId !== userId && can("ban") && (
+                <button
+                  onClick={() => handleBan(m.userId)}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-red-400 bg-red-400/10 rounded hover:bg-red-400/20 transition-colors"
+                >
+                  <Ban className="w-3 h-3" /> Ban
+                </button>
+              )}
+            </div>
           </div>
           {expandedUser === m.userId && (
-            <div className="px-3 pb-2 flex flex-wrap gap-1">
-              {roles.map((role) => {
-                const assigned = (m as any).roleIds?.includes(role.id) ?? false;
-                return (
-                  <button
-                    key={role.id}
-                    onClick={() => handleToggleRole(m.userId, role.id, assigned)}
-                    className={cn(
-                      "px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
-                      assigned
-                        ? "bg-accent/20 text-accent"
-                        : "bg-surface-700 text-surface-500 hover:bg-surface-600"
-                    )}
-                  >
-                    {role.name}
-                  </button>
-                );
-              })}
+            <div className="px-3 pb-2">
+              <p className="text-[9px] text-surface-500 mb-1.5">Click to assign or remove roles:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {roles.map((role) => {
+                  const assigned = (m as any).roleIds?.includes(role.id) ?? false;
+                  return (
+                    <button
+                      key={role.id}
+                      onClick={() => handleToggleRole(m.userId, role.id, assigned)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all flex items-center gap-1.5 border",
+                        assigned
+                          ? "border-green-500/50 bg-green-500/15 text-green-400"
+                          : "border-surface-600 bg-surface-800 text-surface-500 hover:border-surface-500 hover:text-surface-300"
+                      )}
+                    >
+                      {role.color && <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: role.color }} />}
+                      {role.name}
+                      <span className="text-[9px] ml-0.5">{assigned ? "✓" : "+"}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

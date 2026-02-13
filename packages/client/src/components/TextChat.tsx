@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useServerStore } from "../stores/serverStore";
 import { getSignalingClient, getKeyManager } from "../hooks/useConnection";
 import { Send, Lock, ShieldAlert, ShieldEllipsis } from "lucide-react";
+import { getUserRoleColor } from "../lib/role-color";
 import {
   encryptFrame,
   decryptFrame,
@@ -169,7 +170,7 @@ export function TextChat() {
         {messages.map((msg) => (
           <div key={msg.id} className="group min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-surface-200">
+              <span className="text-sm font-medium" style={{ color: getUserRoleColor(msg.userId) ?? undefined }}>
                 {msg.nickname}
               </span>
               <span className="text-[10px] text-surface-600">

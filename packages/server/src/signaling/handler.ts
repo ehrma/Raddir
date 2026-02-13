@@ -3,11 +3,12 @@ import type { IncomingMessage } from "node:http";
 import type { Server as HttpServer } from "node:http";
 import { RateLimiter } from "../lib/rate-limiter.js";
 import { hashCredential } from "../lib/credential-hash.js";
-import type {
-  ClientMessage,
-  ServerMessage,
-  SessionInfo,
-  RoleInfo,
+import {
+  PERMISSION_KEYS,
+  type ClientMessage,
+  type ServerMessage,
+  type SessionInfo,
+  type RoleInfo,
 } from "@raddir/shared";
 import type { RtpCapabilities } from "mediasoup/types";
 import { nanoid } from "nanoid";
@@ -65,6 +66,14 @@ function broadcast(targets: ConnectedClient[], msg: ServerMessage, excludeUserId
       send(client.ws, msg);
     }
   }
+}
+
+/**
+ * Broadcast a message to all connected clients on a given server.
+ * Exported so REST API routes can notify clients about channel CRUD, etc.
+ */
+export function broadcastToServer(serverId: string, msg: ServerMessage): void {
+  broadcast(getServerClients(serverId), msg);
 }
 
 /** Check permission: ephemeral admin bypasses all checks, otherwise use DB roles. */
@@ -321,17 +330,27 @@ async function handleAuth(
     isMuted: c.isMuted,
     isDeafened: c.isDeafened,
     publicKey: c.publicKey,
+    roleIds: getUserRoleIds(c.userId, server.id),
   }));
 
   const roleInfos: RoleInfo[] = roles.map((r) => ({
     id: r.id,
     name: r.name,
+    color: r.color ?? null,
     priority: r.priority,
     permissions: r.permissions,
     isDefault: r.isDefault,
   }));
 
-  const myPermissions = computeEffectivePermissions(user.id, server.id);
+  let myPermissions = computeEffectivePermissions(user.id, server.id);
+
+  // Ephemeral admin (via admin token) gets all permissions
+  if (isAdmin) {
+    myPermissions = { ...myPermissions };
+    for (const key of PERMISSION_KEYS) {
+      myPermissions[key] = "allow";
+    }
+  }
 
   send(ws, {
     type: "joined-server",
@@ -488,6 +507,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
     isMuted: c.isMuted,
     isDeafened: c.isDeafened,
     publicKey: c.publicKey,
+    roleIds: client.serverId ? getUserRoleIds(c.userId, client.serverId) : [],
   }));
 
   send(client.ws, {
@@ -524,6 +544,7 @@ async function handleJoinChannel(client: ConnectedClient, channelId: string): Pr
       isMuted: client.isMuted,
       isDeafened: client.isDeafened,
       publicKey: client.publicKey,
+      roleIds: client.serverId ? getUserRoleIds(client.userId, client.serverId) : [],
     },
   }, client.userId);
 
@@ -798,13 +819,28 @@ function handleAssignRole(client: ConnectedClient, targetUserId: string, roleId:
     unassignRole(targetUserId, client.serverId, roleId);
   }
 
+  const serverClients = getServerClients(client.serverId);
+
   // Broadcast to all connected clients in the server
-  broadcast(getServerClients(client.serverId), {
+  broadcast(serverClients, {
     type: "role-assigned",
     userId: targetUserId,
     roleId,
     assigned: assign,
   });
+
+  // Send updated permissions to the target user so permission-gated UI updates immediately
+  const targetClient = serverClients.find((c) => c.userId === targetUserId);
+  if (targetClient) {
+    let perms = computeEffectivePermissions(targetUserId, client.serverId);
+    if (targetClient.isAdmin) {
+      perms = { ...perms };
+      for (const key of PERMISSION_KEYS) {
+        perms[key] = "allow";
+      }
+    }
+    send(targetClient.ws, { type: "permissions-updated", myPermissions: perms });
+  }
 }
 
 function handleDisconnect(client: ConnectedClient): void {

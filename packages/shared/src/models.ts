@@ -39,6 +39,7 @@ export interface Role {
   id: string;
   serverId: string;
   name: string;
+  color: string | null;
   priority: number;
   permissions: PermissionSet;
   isDefault: boolean;

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("raddir", {
   // Identity key management — private key stays in main process (ECDSA P-256)
   identityGetPublicKey: () => ipcRenderer.invoke("identity-get-public-key"),
   identitySign: (data) => ipcRenderer.invoke("identity-sign", data),
+  identityRegenerate: () => ipcRenderer.invoke("identity-regenerate"),
   identityExport: (passphrase) => ipcRenderer.invoke("identity-export", passphrase),
   identityImportEncrypted: (fileContents, passphrase) =>
     ipcRenderer.invoke("identity-import-encrypted", fileContents, passphrase),

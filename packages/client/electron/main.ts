@@ -1,7 +1,7 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage, session } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { generateKeyPairSync, createSign, createPrivateKey } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -119,6 +119,21 @@ ipcMain.handle("unregister-ptt-key", () => {
 // IPC: Register the Raddir server host to trust its self-signed certificate
 ipcMain.handle("trust-server-host", (_event, host: string) => {
   trustedServerHost = host || null;
+
+  // Also bypass certificate verification at the session level so that
+  // fetch() calls from the renderer trust the self-signed cert.
+  if (trustedServerHost) {
+    const trustedHostname = trustedServerHost.split(":")[0];
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      if (request.hostname === trustedHostname) {
+        callback(0); // 0 = success / trust
+        return;
+      }
+      callback(-3); // -3 = use default verification
+    });
+  } else {
+    session.defaultSession.setCertificateVerifyProc(null);
+  }
 });
 
 // IPC: Encrypt/decrypt strings using OS-level encryption (Electron safeStorage)
@@ -215,6 +230,14 @@ ipcMain.handle("identity-sign", (_event, data: string) => {
   return sig.toString("base64");
 });
 
+
+ipcMain.handle("identity-regenerate", () => {
+  const filePath = getIdentityFilePath();
+  if (existsSync(filePath)) unlinkSync(filePath);
+  cachedIdentity = null;
+  const newId = generateAndStoreIdentity();
+  return newId.publicKeyHex;
+});
 
 // Export identity (passphrase-encrypted) — crypto stays in main process
 ipcMain.handle("identity-export", (_event, passphrase: string) => {

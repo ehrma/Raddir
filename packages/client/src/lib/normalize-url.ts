@@ -2,19 +2,20 @@
  * Normalize a user-friendly server address into a full WebSocket URL.
  *
  * Examples:
- *   "localhost"           → "ws://localhost:4000/ws"
- *   "localhost:4000"      → "ws://localhost:4000/ws"
- *   "192.168.1.5:4000"   → "ws://192.168.1.5:4000/ws"
+ *   "localhost"           → "wss://localhost:4000/ws"
+ *   "localhost:4000"      → "wss://localhost:4000/ws"
+ *   "192.168.1.5:4000"   → "wss://192.168.1.5:4000/ws"
  *   "example.com"         → "wss://example.com:4000/ws"
  *   "wss://example.com"   → "wss://example.com/ws"
- *   "ws://localhost:4000/ws" → "ws://localhost:4000/ws" (unchanged)
+ *   "ws://localhost:4000/ws" → "wss://localhost:4000/ws" (upgraded)
  */
 export function normalizeServerUrl(input: string): string {
   let url = input.trim();
   if (!url) return "";
 
-  // Already a full ws:// or wss:// URL
+  // Already a full ws:// or wss:// URL — always upgrade to wss:// (server uses TLS)
   if (url.startsWith("ws://") || url.startsWith("wss://")) {
+    url = url.replace(/^ws:\/\//, "wss://");
     if (!url.endsWith("/ws")) {
       url = url.replace(/\/+$/, "") + "/ws";
     }
@@ -24,14 +25,8 @@ export function normalizeServerUrl(input: string): string {
   // Strip http(s):// if someone pastes that
   url = url.replace(/^https?:\/\//, "");
 
-  // Use ws:// for local addresses, wss:// for everything else (server has built-in TLS)
-  const isLocal =
-    url.startsWith("localhost") ||
-    url.startsWith("127.") ||
-    url.startsWith("192.168.") ||
-    url.startsWith("10.") ||
-    url.startsWith("172.");
-  const scheme = isLocal ? "ws://" : "wss://";
+  // Always use wss:// — the Raddir server always uses TLS (even self-signed for local)
+  const scheme = "wss://";
 
   // Add default port if none specified
   const hostPart = url.split("/")[0]!;

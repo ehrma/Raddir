@@ -7,19 +7,20 @@ export function createRole(
   serverId: string,
   name: string,
   permissions: PermissionSet,
-  opts: { priority?: number; isDefault?: boolean } = {}
+  opts: { priority?: number; isDefault?: boolean; color?: string | null } = {}
 ): Role {
   const id = nanoid();
   const db = getDb();
   db.prepare(`
-    INSERT INTO roles (id, server_id, name, priority, permissions, is_default)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, serverId, name, opts.priority ?? 0, JSON.stringify(permissions), opts.isDefault ? 1 : 0);
+    INSERT INTO roles (id, server_id, name, priority, permissions, is_default, color)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, serverId, name, opts.priority ?? 0, JSON.stringify(permissions), opts.isDefault ? 1 : 0, opts.color ?? null);
 
   return {
     id,
     serverId,
     name,
+    color: opts.color ?? null,
     priority: opts.priority ?? 0,
     permissions,
     isDefault: opts.isDefault ?? false,
@@ -77,7 +78,7 @@ export function setChannelOverride(channelId: string, roleId: string, permission
   `).run(channelId, roleId, JSON.stringify(permissions));
 }
 
-export function updateRole(id: string, updates: { name?: string; permissions?: PermissionSet; priority?: number }): void {
+export function updateRole(id: string, updates: { name?: string; permissions?: PermissionSet; priority?: number; color?: string | null }): void {
   const db = getDb();
   const sets: string[] = [];
   const values: any[] = [];
@@ -85,6 +86,7 @@ export function updateRole(id: string, updates: { name?: string; permissions?: P
   if (updates.name !== undefined) { sets.push("name = ?"); values.push(updates.name); }
   if (updates.permissions !== undefined) { sets.push("permissions = ?"); values.push(JSON.stringify(updates.permissions)); }
   if (updates.priority !== undefined) { sets.push("priority = ?"); values.push(updates.priority); }
+  if (updates.color !== undefined) { sets.push("color = ?"); values.push(updates.color); }
 
   if (sets.length === 0) return;
   values.push(id);
@@ -117,6 +119,7 @@ function rowToRole(row: any): Role {
     id: row.id,
     serverId: row.server_id,
     name: row.name,
+    color: row.color ?? null,
     priority: row.priority,
     permissions: JSON.parse(row.permissions),
     isDefault: row.is_default === 1,
