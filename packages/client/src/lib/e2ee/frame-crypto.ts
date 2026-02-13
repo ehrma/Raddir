@@ -66,7 +66,7 @@ function createTransform(name: "encrypt" | "decrypt"): TransformEntry {
  * Apply an RTCRtpScriptTransform to a sender (encrypt outgoing frames).
  */
 export function applyEncryptTransform(sender: RTCRtpSender): void {
-  if (!supportsEncodedTransform()) return;
+  if (!supportsEncodedTransform()) throw new Error("RTCRtpScriptTransform not supported — cannot encrypt voice frames");
   const { transform } = createTransform("encrypt") as any;
   (sender as any).transform = transform;
 }
@@ -75,7 +75,7 @@ export function applyEncryptTransform(sender: RTCRtpSender): void {
  * Apply an RTCRtpScriptTransform to a receiver (decrypt incoming frames).
  */
 export function applyDecryptTransform(receiver: RTCRtpReceiver): void {
-  if (!supportsEncodedTransform()) return;
+  if (!supportsEncodedTransform()) throw new Error("RTCRtpScriptTransform not supported — cannot decrypt voice frames");
   const { transform } = createTransform("decrypt") as any;
   (receiver as any).transform = transform;
 }
