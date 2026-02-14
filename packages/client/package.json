@@ -58,6 +58,7 @@
       "category": "public.app-category.social-networking"
     },
     "linux": {
+      "artifactName": "raddir-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "AppImage",
