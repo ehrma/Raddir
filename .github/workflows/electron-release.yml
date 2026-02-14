@@ -83,7 +83,10 @@ jobs:
             packages/client/release/*.exe
             packages/client/release/*.exe.blockmap
             packages/client/release/*.dmg
+            packages/client/release/*.zip
+            packages/client/release/*.zip.blockmap
             packages/client/release/*.AppImage
+            packages/client/release/*.AppImage.zsync
             packages/client/release/*.deb
             packages/client/release/latest*.yml
           if-no-files-found: ignore

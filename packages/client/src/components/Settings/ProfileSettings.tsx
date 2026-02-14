@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServerStore } from "../../stores/serverStore";
 import { getApiBase, getAuthHeaders } from "../../lib/api-base";
 import { Upload, Image, Trash2 } from "lucide-react";
@@ -12,8 +12,24 @@ export function ProfileSettings() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [appVersion, setAppVersion] = useState("dev");
 
   const avatarSrc = currentAvatarUrl ? `${getApiBase()}${currentAvatarUrl}` : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    window.raddir?.getAppVersion?.()
+      .then((version) => {
+        if (!cancelled) setAppVersion(version || "unknown");
+      })
+      .catch(() => {
+        if (!cancelled) setAppVersion("dev");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -150,6 +166,14 @@ export function ProfileSettings() {
             {error && <p className="text-[10px] text-red-400">{error}</p>}
             {success && <p className="text-[10px] text-green-400">Avatar updated!</p>}
           </div>
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-surface-800">
+        <h4 className="text-xs font-semibold text-surface-300 mb-2">Application</h4>
+        <div className="flex items-center justify-between rounded-lg border border-surface-700 bg-surface-800/60 px-3 py-2">
+          <span className="text-xs text-surface-400">Client version</span>
+          <span className="text-xs font-medium text-surface-200">v{appVersion}</span>
         </div>
       </div>
     </div>
