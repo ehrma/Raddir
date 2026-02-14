@@ -3,6 +3,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { generateKeyPairSync, createSign, createPrivateKey } from "node:crypto";
+import { autoUpdater, type ProgressInfo, type UpdateInfo } from "electron-updater";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -10,6 +11,69 @@ const __dirname = dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let trustedServerHost: string | null = null;
+let hasDownloadedUpdate = false;
+
+type AppUpdateStatus =
+  | { state: "idle" }
+  | { state: "disabled"; reason: string }
+  | { state: "checking" }
+  | { state: "available"; version: string }
+  | { state: "downloading"; percent: number }
+  | { state: "not-available" }
+  | { state: "downloaded"; version: string }
+  | { state: "error"; message: string };
+
+let latestAppUpdateStatus: AppUpdateStatus = { state: "idle" };
+
+function emitAppUpdateStatus(status: AppUpdateStatus): void {
+  latestAppUpdateStatus = status;
+  mainWindow?.webContents.send("app-update-status", status);
+}
+
+function setupAutoUpdater(): void {
+  if (!app.isPackaged) {
+    emitAppUpdateStatus({ state: "disabled", reason: "development-build" });
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    emitAppUpdateStatus({ state: "checking" });
+  });
+
+  autoUpdater.on("update-available", (info: UpdateInfo) => {
+    emitAppUpdateStatus({ state: "available", version: info.version });
+  });
+
+  autoUpdater.on("download-progress", (progress: ProgressInfo) => {
+    emitAppUpdateStatus({ state: "downloading", percent: Math.round(progress.percent) });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    emitAppUpdateStatus({ state: "not-available" });
+  });
+
+  autoUpdater.on("update-downloaded", (info: UpdateInfo) => {
+    hasDownloadedUpdate = true;
+    emitAppUpdateStatus({ state: "downloaded", version: info.version });
+  });
+
+  autoUpdater.on("error", (error: Error) => {
+    emitAppUpdateStatus({
+      state: "error",
+      message: error?.message ?? "Failed to check for updates",
+    });
+  });
+
+  void autoUpdater.checkForUpdates().catch((error: unknown) => {
+    emitAppUpdateStatus({
+      state: "error",
+      message: error instanceof Error ? error.message : "Failed to check for updates",
+    });
+  });
+}
 
 function getTrayIconPath(): string {
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -38,6 +102,10 @@ function createWindow(): void {
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  mainWindow.webContents.once("did-finish-load", () => {
+    mainWindow?.webContents.send("app-update-status", latestAppUpdateStatus);
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -85,6 +153,8 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+
+  setupAutoUpdater();
 });
 
 app.on("window-all-closed", () => {
@@ -114,6 +184,37 @@ ipcMain.handle("register-ptt-key", (_event, key: string) => {
 
 ipcMain.handle("unregister-ptt-key", () => {
   globalShortcut.unregisterAll();
+});
+
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});
+
+ipcMain.handle("get-app-update-status", () => {
+  return latestAppUpdateStatus;
+});
+
+ipcMain.handle("check-for-app-updates", async () => {
+  if (!app.isPackaged) {
+    const status = { state: "disabled", reason: "development-build" } as const;
+    emitAppUpdateStatus(status);
+    return { ok: false, reason: status.reason };
+  }
+
+  try {
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to check for updates";
+    emitAppUpdateStatus({ state: "error", message });
+    return { ok: false, reason: message };
+  }
+});
+
+ipcMain.handle("install-app-update-now", () => {
+  if (!hasDownloadedUpdate) return false;
+  setImmediate(() => autoUpdater.quitAndInstall());
+  return true;
 });
 
 // IPC: Register the Raddir server host to trust its self-signed certificate

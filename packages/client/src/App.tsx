@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useServerStore } from "./stores/serverStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { ConnectScreen } from "./components/ConnectScreen";
@@ -7,12 +7,14 @@ import { ReconnectOverlay } from "./components/ReconnectOverlay";
 import { Notification } from "./components/Notification";
 import { useConnection } from "./hooks/useConnection";
 import { loadSettings } from "./lib/settings-persistence";
+import type { AppUpdateStatus } from "./types/electron";
 
 export function App() {
   const { connected, authenticated } = useServerStore();
   const theme = useSettingsStore((s) => s.theme);
   const setResolvedTheme = useSettingsStore((s) => s.setResolvedTheme);
   const { kickReason, banReason, setKickReason, setBanReason } = useConnection();
+  const [downloadedVersion, setDownloadedVersion] = useState<string | null>(null);
 
   // Load persisted settings on mount
   useEffect(() => {
@@ -46,6 +48,29 @@ export function App() {
     }
   }, [theme, setResolvedTheme]);
 
+  // App updates: notify when update is downloaded and restart is required
+  useEffect(() => {
+    if (!window.raddir?.onAppUpdateStatus) return;
+
+    const handleStatus = (status: AppUpdateStatus) => {
+      if (status.state === "downloaded") {
+        setDownloadedVersion(status.version);
+      }
+    };
+
+    const unsub = window.raddir.onAppUpdateStatus(handleStatus);
+
+    window.raddir.getAppUpdateStatus?.()
+      .then((status) => {
+        if (status.state === "downloaded") {
+          setDownloadedVersion(status.version);
+        }
+      })
+      .catch(() => {});
+
+    return () => unsub?.();
+  }, []);
+
   return (
     <>
       {connected && authenticated ? <MainLayout /> : <ConnectScreen />}
@@ -62,6 +87,19 @@ export function App() {
           type="banned"
           message={banReason}
           onDismiss={() => setBanReason(null)}
+        />
+      )}
+
+      {downloadedVersion && (
+        <Notification
+          type="info"
+          persist
+          message={`Update v${downloadedVersion} has been downloaded. Restart Raddir to apply it.`}
+          actionLabel="Restart now"
+          onAction={() => {
+            window.raddir?.installAppUpdateNow?.().catch(() => {});
+          }}
+          onDismiss={() => setDownloadedVersion(null)}
         />
       )}
     </>
