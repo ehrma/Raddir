@@ -18,6 +18,12 @@
     "electron:build:win": "pnpm build:shared && pnpm --filter @raddir/client electron:build:win",
     "electron:build:mac": "pnpm build:shared && pnpm --filter @raddir/client electron:build:mac",
     "electron:build:linux": "pnpm build:shared && pnpm --filter @raddir/client electron:build:linux",
+    "release:client": "node ./scripts/dispatch-release.mjs client --publish",
+    "release:client:draft": "node ./scripts/dispatch-release.mjs client --publish --draft",
+    "release:server": "node ./scripts/dispatch-release.mjs server --publish --latest",
+    "release:server:nolatest": "node ./scripts/dispatch-release.mjs server --publish",
+    "release:client:build": "node ./scripts/dispatch-release.mjs client",
+    "release:server:build": "node ./scripts/dispatch-release.mjs server",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
     "clean": "pnpm -r exec rm -rf dist node_modules"
   },
