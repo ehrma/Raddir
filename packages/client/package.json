@@ -3,6 +3,10 @@
   "version": "0.1.3",
   "private": true,
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ehrma/Raddir.git"
+  },
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
