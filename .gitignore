@@ -24,6 +24,7 @@ data/
 # Review tracking
 e2ee-review-round3.md
 BUGS.md
+hardening.md
 
 # Logs
 *.log
