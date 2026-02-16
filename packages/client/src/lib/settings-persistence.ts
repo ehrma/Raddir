@@ -8,6 +8,8 @@ interface PersistedSettings {
   serverUrl: string;
   nickname: string;
   pttKey: string;
+  muteKey: string;
+  deafenKey: string;
   voiceActivation: boolean;
   vadThreshold: number;
   inputDeviceId: string;
@@ -73,6 +75,8 @@ export async function loadSettings(): Promise<void> {
     if (saved.serverUrl) store.setServerUrl(saved.serverUrl);
     if (saved.nickname) store.setNickname(saved.nickname);
     if (saved.pttKey !== undefined) store.setPttKey(saved.pttKey);
+    if (saved.muteKey !== undefined) store.setMuteKey(saved.muteKey);
+    if (saved.deafenKey !== undefined) store.setDeafenKey(saved.deafenKey);
     if (saved.voiceActivation !== undefined) store.setVoiceActivation(saved.voiceActivation);
     if (saved.vadThreshold !== undefined) store.setVadThreshold(saved.vadThreshold);
     if (saved.inputDeviceId) store.setInputDeviceId(saved.inputDeviceId);
@@ -99,6 +103,8 @@ export async function saveSettings(): Promise<void> {
       serverUrl: state.serverUrl,
       nickname: state.nickname,
       pttKey: state.pttKey,
+      muteKey: state.muteKey,
+      deafenKey: state.deafenKey,
       voiceActivation: state.voiceActivation,
       vadThreshold: state.vadThreshold,
       inputDeviceId: state.inputDeviceId,

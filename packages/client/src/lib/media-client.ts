@@ -24,6 +24,7 @@ export class MediaClient {
   private onConsumerCreated?: (userId: string, consumer: Consumer, stream: MediaStream) => void;
   private onVideoConsumerCreated?: (userId: string, consumer: Consumer, stream: MediaStream, mediaType: string) => void;
   private pendingMediaType: "mic" | "webcam" | "screen" = "mic";
+  private micSendTrack: MediaStreamTrack | null = null;
 
   constructor(signaling: SignalingClient) {
     this.signaling = signaling;
@@ -114,12 +115,22 @@ export class MediaClient {
       await this.createSendTransport();
     }
 
-    const track = stream.getAudioTracks()[0];
-    if (!track) throw new Error("No audio track in stream");
+    const sourceTrack = stream.getAudioTracks()[0];
+    if (!sourceTrack) throw new Error("No audio track in stream");
+    const sendTrack = sourceTrack.clone();
+    if (this.micSendTrack) {
+      this.micSendTrack.stop();
+    }
+    this.micSendTrack = sendTrack;
 
     this.pendingMediaType = "mic";
     const producer = await this.sendTransport!.produce({
-      track,
+      track: sendTrack,
+      // Keep track enabled while paused so local VAD can still read mic energy.
+      // Otherwise VA deadlocks: paused producer disables track => VAD sees silence forever.
+      disableTrackOnPause: false,
+      // But still force actual RTP muting when paused (for mute/PTT/deafen semantics).
+      zeroRtpOnPause: true,
       codecOptions: {
         opusStereo: true,
         opusDtx: true,
@@ -140,6 +151,8 @@ export class MediaClient {
     producer.on("transportclose", () => {
       console.log("[media] Mic producer transport closed");
       this.producers.delete("mic");
+      this.micSendTrack?.stop();
+      this.micSendTrack = null;
     });
   }
 
@@ -210,10 +223,18 @@ export class MediaClient {
     this.signaling.send({ type: "stop-producer", producerId: producer.id });
     producer.close();
     this.producers.delete(mediaType);
+    if (mediaType === "mic") {
+      this.micSendTrack?.stop();
+      this.micSendTrack = null;
+    }
   }
 
   getProducerId(mediaType: string): string | undefined {
     return this.producers.get(mediaType)?.id;
+  }
+
+  hasProducer(mediaType: string): boolean {
+    return this.producers.has(mediaType);
   }
 
   async consume(producerId: string, userId: string): Promise<Consumer | null> {
@@ -278,7 +299,8 @@ export class MediaClient {
               const audio = document.createElement("audio");
               audio.srcObject = stream;
               audio.autoplay = true;
-              audio.volume = 0; // muted — playback is via GainNode
+              audio.muted = true; // keep track alive; playback is via GainNode
+              audio.volume = 0;
               if (this.outputDeviceId !== "default" && typeof (audio as any).setSinkId === "function") {
                 (audio as any).setSinkId(this.outputDeviceId).catch(() => {});
               }
@@ -359,16 +381,16 @@ export class MediaClient {
   pauseProducer(): void {
     const mic = this.producers.get("mic");
     if (mic) {
-      mic.pause();
-      const track = mic.track;
+      const track = this.micSendTrack ?? mic.track;
       if (track) track.enabled = false;
+      mic.pause();
     }
   }
 
   resumeProducer(): void {
     const mic = this.producers.get("mic");
     if (mic) {
-      const track = mic.track;
+      const track = this.micSendTrack ?? mic.track;
       if (track) track.enabled = true;
       mic.resume();
     }
@@ -377,7 +399,13 @@ export class MediaClient {
   async replaceTrack(newTrack: MediaStreamTrack): Promise<void> {
     const mic = this.producers.get("mic");
     if (mic) {
-      await mic.replaceTrack({ track: newTrack });
+      const replacement = newTrack.clone();
+      const previous = this.micSendTrack ?? mic.track;
+      await mic.replaceTrack({ track: replacement });
+      this.micSendTrack = replacement;
+      if (previous && previous !== replacement) {
+        previous.stop();
+      }
     }
   }
 
@@ -386,6 +414,8 @@ export class MediaClient {
   }
 
   close(): void {
+    this.micSendTrack?.stop();
+    this.micSendTrack = null;
     for (const producer of this.producers.values()) {
       producer.close();
     }

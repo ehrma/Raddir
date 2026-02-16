@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("raddir", {
   registerPttKey: (key) => ipcRenderer.invoke("register-ptt-key", key),
   unregisterPttKey: () => ipcRenderer.invoke("unregister-ptt-key"),
+  registerMuteKey: (key) => ipcRenderer.invoke("register-mute-key", key),
+  unregisterMuteKey: () => ipcRenderer.invoke("unregister-mute-key"),
+  registerDeafenKey: (key) => ipcRenderer.invoke("register-deafen-key", key),
+  unregisterDeafenKey: () => ipcRenderer.invoke("unregister-deafen-key"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
   getAppUpdateStatus: () => ipcRenderer.invoke("get-app-update-status"),
   checkForAppUpdates: () => ipcRenderer.invoke("check-for-app-updates"),
@@ -29,6 +33,14 @@ contextBridge.exposeInMainWorld("raddir", {
   onPttPressed: (callback) => {
     ipcRenderer.on("ptt-pressed", callback);
     return () => ipcRenderer.removeListener("ptt-pressed", callback);
+  },
+  onMuteTogglePressed: (callback) => {
+    ipcRenderer.on("mute-toggle-pressed", callback);
+    return () => ipcRenderer.removeListener("mute-toggle-pressed", callback);
+  },
+  onDeafenTogglePressed: (callback) => {
+    ipcRenderer.on("deafen-toggle-pressed", callback);
+    return () => ipcRenderer.removeListener("deafen-toggle-pressed", callback);
   },
   onThemeChanged: (callback) => {
     const handler = (_event, theme) => callback(theme);

@@ -16,6 +16,8 @@ export interface SettingsState {
   nickname: string;
   savedServers: SavedServer[];
   pttKey: string;
+  muteKey: string;
+  deafenKey: string;
   voiceActivation: boolean;
   vadThreshold: number;
   inputDeviceId: string;
@@ -37,6 +39,8 @@ export interface SettingsState {
   setServerUrl: (url: string) => void;
   setNickname: (nickname: string) => void;
   setPttKey: (key: string) => void;
+  setMuteKey: (key: string) => void;
+  setDeafenKey: (key: string) => void;
   setVoiceActivation: (enabled: boolean) => void;
   setVadThreshold: (threshold: number) => void;
   setInputDeviceId: (id: string) => void;
@@ -65,6 +69,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   nickname: `User-${Math.random().toString(36).slice(2, 6)}`,
   savedServers: [],
   pttKey: "",
+  muteKey: "",
+  deafenKey: "",
   voiceActivation: false,
   vadThreshold: -50,
   inputDeviceId: "default",
@@ -85,6 +91,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setServerUrl: (serverUrl) => set({ serverUrl }),
   setNickname: (nickname) => set({ nickname }),
   setPttKey: (pttKey) => set({ pttKey }),
+  setMuteKey: (muteKey) => set({ muteKey }),
+  setDeafenKey: (deafenKey) => set({ deafenKey }),
   setVoiceActivation: (voiceActivation) => set({ voiceActivation }),
   setVadThreshold: (vadThreshold) => set({ vadThreshold }),
   setInputDeviceId: (inputDeviceId) => set({ inputDeviceId }),

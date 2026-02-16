@@ -13,6 +13,10 @@ let tray: Tray | null = null;
 let trustedServerHost: string | null = null;
 let hasDownloadedUpdate = false;
 
+type ShortcutAction = "ptt" | "mute-toggle" | "deafen-toggle";
+const shortcutAccelerators = new Map<ShortcutAction, string>();
+const shortcutLastTriggerAt = new Map<ShortcutAction, number>();
+
 type AppUpdateStatus =
   | { state: "idle" }
   | { state: "disabled"; reason: string }
@@ -165,25 +169,110 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  shortcutAccelerators.clear();
+  shortcutLastTriggerAt.clear();
 });
 
-// IPC: Push-to-talk global shortcut registration
-ipcMain.handle("register-ptt-key", (_event, key: string) => {
-  globalShortcut.unregisterAll();
+function normalizePttAccelerator(key: string): string {
+  if (!key) return "";
+
+  // KeyboardEvent.code from renderer key capture
+  if (key.startsWith("Key") && key.length === 4) {
+    return key.slice(3).toUpperCase();
+  }
+  if (key.startsWith("Digit") && key.length === 6) {
+    return key.slice(5);
+  }
+
+  const map: Record<string, string> = {
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    Escape: "Esc",
+    ControlLeft: "Control",
+    ControlRight: "Control",
+    ShiftLeft: "Shift",
+    ShiftRight: "Shift",
+    AltLeft: "Alt",
+    AltRight: "Alt",
+    MetaLeft: "Super",
+    MetaRight: "Super",
+  };
+
+  return map[key] ?? key;
+}
+
+function actionEventName(action: ShortcutAction): string {
+  switch (action) {
+    case "ptt": return "ptt-pressed";
+    case "mute-toggle": return "mute-toggle-pressed";
+    case "deafen-toggle": return "deafen-toggle-pressed";
+  }
+}
+
+function emitShortcutAction(action: ShortcutAction): void {
+  const now = Date.now();
+  const last = shortcutLastTriggerAt.get(action) ?? 0;
+  if (now - last < 120) return;
+  shortcutLastTriggerAt.set(action, now);
+  mainWindow?.webContents.send(actionEventName(action));
+}
+
+function unregisterShortcutAction(action: ShortcutAction): void {
+  const existing = shortcutAccelerators.get(action);
+  if (!existing) return;
+  globalShortcut.unregister(existing);
+  shortcutAccelerators.delete(action);
+}
+
+function registerShortcutAction(action: ShortcutAction, key: string): void {
+  unregisterShortcutAction(action);
 
   if (!key) return;
 
-  globalShortcut.register(key, () => {
-    mainWindow?.webContents.send("ptt-pressed");
-  });
+  const accelerator = normalizePttAccelerator(key);
+  if (!accelerator) return;
 
-  // There's no "key up" event for globalShortcut, so we use a polling approach
-  // The renderer will handle PTT state via keydown/keyup for focused window
-  // and globalShortcut for unfocused window
+  try {
+    const ok = globalShortcut.register(accelerator, () => {
+      emitShortcutAction(action);
+    });
+
+    if (!ok) {
+      console.warn(`[hotkey] Failed to register ${action}: ${accelerator}`);
+      return;
+    }
+
+    shortcutAccelerators.set(action, accelerator);
+  } catch (err) {
+    console.warn(`[hotkey] Invalid shortcut for ${action}: ${accelerator}`, err);
+  }
+}
+
+// IPC: Push-to-talk global shortcut registration
+ipcMain.handle("register-ptt-key", (_event, key: string) => {
+  registerShortcutAction("ptt", key);
 });
 
 ipcMain.handle("unregister-ptt-key", () => {
-  globalShortcut.unregisterAll();
+  unregisterShortcutAction("ptt");
+});
+
+ipcMain.handle("register-mute-key", (_event, key: string) => {
+  registerShortcutAction("mute-toggle", key);
+});
+
+ipcMain.handle("unregister-mute-key", () => {
+  unregisterShortcutAction("mute-toggle");
+});
+
+ipcMain.handle("register-deafen-key", (_event, key: string) => {
+  registerShortcutAction("deafen-toggle", key);
+});
+
+ipcMain.handle("unregister-deafen-key", () => {
+  unregisterShortcutAction("deafen-toggle");
 });
 
 ipcMain.handle("get-app-version", () => {
