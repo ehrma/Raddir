@@ -13,10 +13,237 @@ import type { ServerJoinedChannelMessage, ServerNewProducerMessage } from "@radd
 
 let mediaClient: MediaClient | null = null;
 let vad: VoiceActivityDetector | null = null;
+let vadSource: MediaStreamAudioSourceNode | null = null;
 let localStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let mediaReady = false;
 let pendingProducers: Array<{ producerId: string; userId: string }> = [];
+let lastSentSpeaking: boolean | null = null;
+let lastLocalSpeaking: boolean | null = null;
+let currentTransmit: boolean | null = null;
+let pttPressed = false;
+let vadSpeaking = false;
+
+type TransmitMode = "voice-activation" | "ptt";
+
+interface PttBinding {
+  code: string;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+  hasCombo: boolean;
+}
+
+function getTransmitMode(): TransmitMode {
+  const { voiceActivation, pttKey } = useSettingsStore.getState();
+  if (voiceActivation) return "voice-activation";
+  if (pttKey) return "ptt";
+  // Product rule: no implicit open-mic fallback.
+  return "ptt";
+}
+
+function normalizePttKeyCode(token: string): string {
+  if (!token) return "";
+  if (token.startsWith("Key") || token.startsWith("Digit") || token.startsWith("Arrow")) {
+    return token;
+  }
+  if (/^[A-Za-z]$/.test(token)) {
+    return `Key${token.toUpperCase()}`;
+  }
+  if (/^[0-9]$/.test(token)) {
+    return `Digit${token}`;
+  }
+
+  const map: Record<string, string> = {
+    Up: "ArrowUp",
+    Down: "ArrowDown",
+    Left: "ArrowLeft",
+    Right: "ArrowRight",
+    Esc: "Escape",
+    Escape: "Escape",
+    Space: "Space",
+    Enter: "Enter",
+    Tab: "Tab",
+    Backspace: "Backspace",
+  };
+
+  return map[token] ?? token;
+}
+
+function parsePttBinding(configured: string): PttBinding | null {
+  const raw = configured.trim();
+  if (!raw) return null;
+
+  const parts = raw.split("+").map((p) => p.trim()).filter(Boolean);
+  let ctrl = false;
+  let alt = false;
+  let shift = false;
+  let meta = false;
+  let keyToken = "";
+
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (lower === "ctrl" || lower === "control" || lower === "controlleft" || lower === "controlright") {
+      ctrl = true;
+      continue;
+    }
+    if (lower === "alt" || lower === "altleft" || lower === "altright" || lower === "option") {
+      alt = true;
+      continue;
+    }
+    if (lower === "shift" || lower === "shiftleft" || lower === "shiftright") {
+      shift = true;
+      continue;
+    }
+    if (
+      lower === "meta" || lower === "super" || lower === "cmd" || lower === "command" ||
+      lower === "metaleft" || lower === "metaright" || lower === "win" || lower === "windows"
+    ) {
+      meta = true;
+      continue;
+    }
+    keyToken = part;
+  }
+
+  if (!keyToken) {
+    keyToken = parts[parts.length - 1] ?? "";
+  }
+
+  const code = normalizePttKeyCode(keyToken);
+  if (!code) return null;
+
+  return {
+    code,
+    ctrl,
+    alt,
+    shift,
+    meta,
+    hasCombo: parts.length > 1,
+  };
+}
+
+function isMatchingPttKeyDown(e: KeyboardEvent, binding: PttBinding): boolean {
+  if (e.code !== binding.code) return false;
+  return (
+    e.ctrlKey === binding.ctrl &&
+    e.altKey === binding.alt &&
+    e.shiftKey === binding.shift &&
+    e.metaKey === binding.meta
+  );
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+function shouldRegisterGlobalShortcut(configured: string): boolean {
+  const binding = parsePttBinding(configured);
+  if (!binding) return false;
+  // Electron globalShortcut is exclusive and will steal plain keys system-wide.
+  // To avoid blocking user input in other apps, only allow explicit combo accelerators.
+  return binding.hasCombo;
+}
+
+function setLocalSpeakingState(speaking: boolean): void {
+  if (lastLocalSpeaking !== speaking) {
+    useVoiceStore.getState().setSpeaking(speaking);
+    const currentUserId = useServerStore.getState().userId;
+    if (currentUserId) {
+      useVoiceStore.getState().setUserSpeaking(currentUserId, speaking);
+    }
+    lastLocalSpeaking = speaking;
+  }
+
+  // Never spam the signaling channel with duplicate speaking states.
+  if (lastSentSpeaking === speaking) {
+    return;
+  }
+  lastSentSpeaking = speaking;
+
+  const signaling = getSignalingClient();
+  signaling?.send({ type: "speaking", speaking });
+}
+
+function setTransmitState(shouldTransmit: boolean): void {
+  const hasMicProducer = !!mediaClient?.hasProducer("mic");
+  if (!hasMicProducer) {
+    // Do not cache desired state before producer exists.
+    // Otherwise first real pause/resume after produce can be skipped.
+    currentTransmit = null;
+    return;
+  }
+
+  if (currentTransmit === shouldTransmit) return;
+  currentTransmit = shouldTransmit;
+
+  if (shouldTransmit) {
+    mediaClient?.resumeProducer();
+  } else {
+    mediaClient?.pauseProducer();
+  }
+}
+
+function applyAudioState(): void {
+  const { isMuted } = useVoiceStore.getState();
+  const mode = getTransmitMode();
+
+  let shouldTransmit = false;
+  let shouldSpeak = false;
+
+  if (!isMuted) {
+    if (mode === "voice-activation") {
+      shouldTransmit = vadSpeaking;
+      shouldSpeak = vadSpeaking;
+    } else {
+      shouldTransmit = pttPressed;
+      shouldSpeak = pttPressed;
+    }
+  }
+
+  setTransmitState(shouldTransmit);
+  setLocalSpeakingState(shouldSpeak);
+}
+
+function restartVadPipeline(): void {
+  if (!audioContext || !localStream) return;
+
+  const { vadThreshold } = useSettingsStore.getState();
+  const mode = getTransmitMode();
+  const needsVad = mode === "voice-activation";
+
+  vad?.stop();
+  vad = null;
+
+  try {
+    vadSource?.disconnect();
+  } catch {}
+  vadSource = null;
+
+  vadSpeaking = false;
+
+  if (!needsVad) {
+    applyAudioState();
+    return;
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume().catch(() => {});
+  }
+
+  const source = audioContext.createMediaStreamSource(localStream);
+  vadSource = source;
+  vad = new VoiceActivityDetector(audioContext, source, vadThreshold);
+  vad.start((speaking) => {
+    vadSpeaking = speaking;
+    applyAudioState();
+  });
+
+  applyAudioState();
+}
 
 /** Get the live audio context (available when in a voice channel) */
 export function getLiveAudioContext(): AudioContext | null {
@@ -29,10 +256,15 @@ export function getLiveStream(): MediaStream | null {
 }
 
 export function useAudio() {
-  const { currentChannelId, userId } = useServerStore();
-  const { isMuted, isDeafened, isPttActive, setSpeaking, setUserSpeaking } = useVoiceStore();
+  const { currentChannelId } = useServerStore();
+  const { isMuted, isDeafened } = useVoiceStore();
   const inputDeviceId = useSettingsStore((s) => s.inputDeviceId);
   const outputDeviceId = useSettingsStore((s) => s.outputDeviceId);
+  const muteKey = useSettingsStore((s) => s.muteKey);
+  const deafenKey = useSettingsStore((s) => s.deafenKey);
+  const noiseSuppression = useSettingsStore((s) => s.noiseSuppression);
+  const echoCancellation = useSettingsStore((s) => s.echoCancellation);
+  const autoGainControl = useSettingsStore((s) => s.autoGainControl);
   const voiceActivation = useSettingsStore((s) => s.voiceActivation);
   const vadThreshold = useSettingsStore((s) => s.vadThreshold);
   const pttKey = useSettingsStore((s) => s.pttKey);
@@ -63,10 +295,8 @@ export function useAudio() {
         await mediaClient.loadDevice(data.routerRtpCapabilities as any);
 
         // Apply stored output device immediately
-        const storedOutputDevice = useSettingsStore.getState().outputDeviceId;
-        if (storedOutputDevice && storedOutputDevice !== "default") {
-          mediaClient.setOutputDevice(storedOutputDevice).catch(() => {});
-        }
+        const storedOutputDevice = useSettingsStore.getState().outputDeviceId || "default";
+        mediaClient.setOutputDevice(storedOutputDevice).catch(() => {});
 
         // Send our RTP capabilities to the server so it can create consumers for us
         if (mediaClient.rtpCapabilities) {
@@ -133,12 +363,12 @@ export function useAudio() {
           await mediaClient.produce(localStream);
           console.log("[audio] Producing audio (E2EE active)");
 
-          // If user is already muted, pause the producer immediately
-          const { isMuted } = useVoiceStore.getState();
-          if (isMuted) {
-            mediaClient.pauseProducer();
-            console.log("[audio] User is muted, pausing producer");
-          }
+          // Ensure first post-produce state is always applied to the real producer.
+          currentTransmit = null;
+
+          // Ensure indicator behavior matches current mode (VA/open-mic/PTT).
+          restartVadPipeline();
+          applyAudioState();
         }
 
         // Now ready — consume any producers that arrived during setup
@@ -222,10 +452,12 @@ export function useAudio() {
 
       if (isMuted) {
         playMuteSound();
-        mediaClient?.pauseProducer();
+        pttPressed = false;
+        useVoiceStore.getState().setPttActive(false);
+        applyAudioState();
       } else {
         playUnmuteSound();
-        mediaClient?.resumeProducer();
+        applyAudioState();
       }
 
       const signaling = getSignalingClient();
@@ -260,20 +492,59 @@ export function useAudio() {
   useEffect(() => {
     if (!pttKey || voiceActivation) return;
 
-    // Register global shortcut with Electron
-    window.raddir?.registerPttKey(pttKey);
+    const pttBinding = parsePttBinding(pttKey);
+    if (!pttBinding) return;
+
+    let globalPttReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+    const allowGlobalPtt = shouldRegisterGlobalShortcut(pttKey);
+    const registerGlobal = () => {
+      if (allowGlobalPtt) {
+        window.raddir?.registerPttKey(pttKey);
+      }
+    };
+    const unregisterGlobal = () => {
+      if (allowGlobalPtt) {
+        window.raddir?.unregisterPttKey();
+      }
+    };
+
+    // Avoid hijacking normal typing while app is focused.
+    if (allowGlobalPtt) {
+      if (document.hasFocus()) {
+        unregisterGlobal();
+      } else {
+        registerGlobal();
+      }
+    }
+
+    const handleFocus = () => {
+      unregisterGlobal();
+    };
+
+    const handleBlur = () => {
+      registerGlobal();
+    };
+
+    if (allowGlobalPtt) {
+      window.addEventListener("focus", handleFocus);
+      window.addEventListener("blur", handleBlur);
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === pttKey && !e.repeat) {
+      if (isTypingTarget(e.target)) return;
+      if (isMatchingPttKeyDown(e, pttBinding) && !e.repeat) {
+        if (useVoiceStore.getState().isMuted) return;
+        pttPressed = true;
         useVoiceStore.getState().setPttActive(true);
-        mediaClient?.resumeProducer();
+        applyAudioState();
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === pttKey) {
+      if (e.code === pttBinding.code) {
+        pttPressed = false;
         useVoiceStore.getState().setPttActive(false);
-        mediaClient?.pauseProducer();
+        applyAudioState();
       }
     };
 
@@ -281,33 +552,228 @@ export function useAudio() {
     window.addEventListener("keyup", handleKeyUp);
 
     // Listen for Electron global PTT (fires when app is unfocused)
-    const unsubPtt = window.raddir?.onPttPressed(() => {
-      useVoiceStore.getState().setPttActive(true);
-      mediaClient?.resumeProducer();
-      setTimeout(() => {
-        useVoiceStore.getState().setPttActive(false);
-        mediaClient?.pauseProducer();
-      }, 100);
-    });
+    const unsubPtt = allowGlobalPtt
+      ? window.raddir?.onPttPressed(() => {
+          // When app is focused, keydown/keyup already provide proper hold semantics.
+          // Ignore global shortcut pulse to avoid indicator/transmit flicker.
+          if (document.hasFocus()) return;
+          if (useVoiceStore.getState().isMuted) return;
 
-    // PTT mode: start with producer paused
-    mediaClient?.pauseProducer();
+          // Global shortcut can fire repeatedly while key is held.
+          // Treat repeated pulses as "still held" instead of re-sending speaking=true.
+          if (!useVoiceStore.getState().isPttActive) {
+            pttPressed = true;
+            useVoiceStore.getState().setPttActive(true);
+            applyAudioState();
+          }
+
+          if (globalPttReleaseTimer) {
+            clearTimeout(globalPttReleaseTimer);
+          }
+          globalPttReleaseTimer = setTimeout(() => {
+            pttPressed = false;
+            useVoiceStore.getState().setPttActive(false);
+            applyAudioState();
+            globalPttReleaseTimer = null;
+          }, 150);
+        })
+      : undefined;
+
+    // PTT mode starts idle.
+    pttPressed = false;
+    applyAudioState();
 
     return () => {
+      if (globalPttReleaseTimer) {
+        clearTimeout(globalPttReleaseTimer);
+        globalPttReleaseTimer = null;
+      }
+      pttPressed = false;
+      if (allowGlobalPtt) {
+        window.removeEventListener("focus", handleFocus);
+        window.removeEventListener("blur", handleBlur);
+      }
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       unsubPtt?.();
-      window.raddir?.unregisterPttKey();
+      unregisterGlobal();
+      applyAudioState();
     };
   }, [pttKey, voiceActivation]);
+
+  // Mute toggle hotkey
+  useEffect(() => {
+    if (!muteKey) return;
+
+    const muteBinding = parsePttBinding(muteKey);
+    if (!muteBinding) return;
+
+    const allowGlobalMute = shouldRegisterGlobalShortcut(muteKey);
+    let lastToggleAt = 0;
+
+    const triggerMuteToggle = () => {
+      const now = Date.now();
+      if (now - lastToggleAt < 150) return;
+      lastToggleAt = now;
+      useVoiceStore.getState().toggleMute();
+    };
+
+    const registerGlobal = () => {
+      if (allowGlobalMute) {
+        window.raddir?.registerMuteKey(muteKey);
+      }
+    };
+    const unregisterGlobal = () => {
+      if (allowGlobalMute) {
+        window.raddir?.unregisterMuteKey();
+      }
+    };
+
+    if (allowGlobalMute) {
+      if (document.hasFocus()) {
+        unregisterGlobal();
+      } else {
+        registerGlobal();
+      }
+    }
+
+    const handleFocus = () => {
+      unregisterGlobal();
+    };
+
+    const handleBlur = () => {
+      registerGlobal();
+    };
+
+    if (allowGlobalMute) {
+      window.addEventListener("focus", handleFocus);
+      window.addEventListener("blur", handleBlur);
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (isMatchingPttKeyDown(e, muteBinding) && !e.repeat) {
+        triggerMuteToggle();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    const unsubGlobalMute = allowGlobalMute
+      ? window.raddir?.onMuteTogglePressed(() => {
+          if (document.hasFocus()) return;
+          triggerMuteToggle();
+        })
+      : undefined;
+
+    return () => {
+      if (allowGlobalMute) {
+        window.removeEventListener("focus", handleFocus);
+        window.removeEventListener("blur", handleBlur);
+      }
+      window.removeEventListener("keydown", handleKeyDown);
+      unsubGlobalMute?.();
+      unregisterGlobal();
+    };
+  }, [muteKey]);
+
+  // Deafen toggle hotkey
+  useEffect(() => {
+    if (!deafenKey) return;
+
+    const deafenBinding = parsePttBinding(deafenKey);
+    if (!deafenBinding) return;
+
+    const allowGlobalDeafen = shouldRegisterGlobalShortcut(deafenKey);
+    let lastToggleAt = 0;
+
+    const triggerDeafenToggle = () => {
+      const now = Date.now();
+      if (now - lastToggleAt < 150) return;
+      lastToggleAt = now;
+      useVoiceStore.getState().toggleDeafen();
+    };
+
+    const registerGlobal = () => {
+      if (allowGlobalDeafen) {
+        window.raddir?.registerDeafenKey(deafenKey);
+      }
+    };
+    const unregisterGlobal = () => {
+      if (allowGlobalDeafen) {
+        window.raddir?.unregisterDeafenKey();
+      }
+    };
+
+    if (allowGlobalDeafen) {
+      if (document.hasFocus()) {
+        unregisterGlobal();
+      } else {
+        registerGlobal();
+      }
+    }
+
+    const handleFocus = () => {
+      unregisterGlobal();
+    };
+
+    const handleBlur = () => {
+      registerGlobal();
+    };
+
+    if (allowGlobalDeafen) {
+      window.addEventListener("focus", handleFocus);
+      window.addEventListener("blur", handleBlur);
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (isMatchingPttKeyDown(e, deafenBinding) && !e.repeat) {
+        triggerDeafenToggle();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    const unsubGlobalDeafen = allowGlobalDeafen
+      ? window.raddir?.onDeafenTogglePressed(() => {
+          if (document.hasFocus()) return;
+          triggerDeafenToggle();
+        })
+      : undefined;
+
+    return () => {
+      if (allowGlobalDeafen) {
+        window.removeEventListener("focus", handleFocus);
+        window.removeEventListener("blur", handleBlur);
+      }
+      window.removeEventListener("keydown", handleKeyDown);
+      unsubGlobalDeafen?.();
+      unregisterGlobal();
+    };
+  }, [deafenKey]);
+
+  // Reconfigure VAD + producer state when mode changes.
+  useEffect(() => {
+    restartVadPipeline();
+    applyAudioState();
+  }, [voiceActivation, pttKey, isMuted]);
 
   // Device hot-switching
   const switchInputDevice = useCallback(async (deviceId: string) => {
     if (!localStream || !mediaClient) return;
 
     try {
+      const { echoCancellation, noiseSuppression, autoGainControl } = useSettingsStore.getState();
       const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true },
+        audio: {
+          deviceId: deviceId !== "default" ? { exact: deviceId } : undefined,
+          echoCancellation,
+          noiseSuppression,
+          autoGainControl,
+          sampleRate: 48000,
+          channelCount: 1,
+        },
       });
 
       const newTrack = newStream.getAudioTracks()[0];
@@ -322,22 +788,7 @@ export function useAudio() {
 
       localStream = newStream;
 
-      // Re-setup VAD on new stream
-      const { voiceActivation: va, vadThreshold: vt } = useSettingsStore.getState();
-      if (va && audioContext) {
-        vad?.stop();
-        const source = audioContext.createMediaStreamSource(newStream);
-        vad = new VoiceActivityDetector(audioContext, source, vt);
-        vad.start((speaking) => {
-          useVoiceStore.getState().setSpeaking(speaking);
-          const currentUserId = useServerStore.getState().userId;
-          if (currentUserId) {
-            useVoiceStore.getState().setUserSpeaking(currentUserId, speaking);
-          }
-          const signaling = getSignalingClient();
-          signaling?.send({ type: "speaking", speaking });
-        });
-      }
+      restartVadPipeline();
     } catch (err) {
       console.error("[audio] Failed to switch input device:", err);
     }
@@ -345,10 +796,39 @@ export function useAudio() {
 
   // Watch for input device changes
   useEffect(() => {
-    if (localStream && inputDeviceId !== "default") {
+    if (localStream) {
       switchInputDevice(inputDeviceId);
     }
   }, [inputDeviceId, switchInputDevice]);
+
+  // Hot-apply mic processing toggles by re-acquiring the current input.
+  useEffect(() => {
+    if (localStream) {
+      const selectedInput = useSettingsStore.getState().inputDeviceId;
+      switchInputDevice(selectedInput);
+    }
+  }, [noiseSuppression, echoCancellation, autoGainControl, switchInputDevice]);
+
+  // Re-acquire selected devices when OS/device topology changes.
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return;
+
+    const handleDeviceChange = () => {
+      const selectedInput = useSettingsStore.getState().inputDeviceId;
+      if (localStream) {
+        switchInputDevice(selectedInput);
+      }
+
+      const selectedOutput = useSettingsStore.getState().outputDeviceId;
+      mediaClient?.setOutputDevice(selectedOutput).catch(() => {});
+    };
+
+    mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+    };
+  }, [switchInputDevice]);
 
   // Output device routing
   useEffect(() => {
@@ -385,21 +865,15 @@ async function startMicrophone(deviceId: string): Promise<void> {
     });
 
     audioContext = new AudioContext({ sampleRate: 48000 });
-    const source = audioContext.createMediaStreamSource(localStream);
-
-    const { voiceActivation, vadThreshold } = useSettingsStore.getState();
-    if (voiceActivation) {
-      vad = new VoiceActivityDetector(audioContext, source, vadThreshold);
-      vad.start((speaking) => {
-        useVoiceStore.getState().setSpeaking(speaking);
-        const currentUserId = useServerStore.getState().userId;
-        if (currentUserId) {
-          useVoiceStore.getState().setUserSpeaking(currentUserId, speaking);
-        }
-        const signaling = getSignalingClient();
-        signaling?.send({ type: "speaking", speaking });
-      });
+    if (audioContext.state === "suspended") {
+      await audioContext.resume().catch(() => {});
     }
+    audioContext.addEventListener("statechange", () => {
+      if (audioContext?.state === "suspended") {
+        audioContext.resume().catch(() => {});
+      }
+    });
+    restartVadPipeline();
   } catch (err) {
     console.error("[audio] Failed to get microphone:", err);
   }
@@ -427,6 +901,18 @@ function cleanupAudio(): void {
     audioContext.close().catch(() => {});
     audioContext = null;
   }
+
+  try {
+    vadSource?.disconnect();
+  } catch {}
+  vadSource = null;
+
+  pttPressed = false;
+  vadSpeaking = false;
+  currentTransmit = null;
+  setLocalSpeakingState(false);
+  lastLocalSpeaking = null;
+  lastSentSpeaking = null;
 
   resetFrameCrypto();
 }

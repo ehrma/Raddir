@@ -39,3 +39,4 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+/packages/client/%TEMP%
