@@ -12,6 +12,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let trustedServerHost: string | null = null;
 let hasDownloadedUpdate = false;
+let pendingScreenShareSelection: { sourceId: string; includeAudio: boolean } | null = null;
 
 type ShortcutAction = "ptt" | "mute-toggle" | "deafen-toggle";
 const shortcutAccelerators = new Map<ShortcutAction, string>();
@@ -138,6 +139,41 @@ app.on("certificate-error", (event, _webContents, url, _error, _certificate, cal
 
 app.whenReady().then(() => {
   createWindow();
+
+  // Route renderer getDisplayMedia requests through the source chosen in our custom picker.
+  // This avoids risky chromeMediaSource constraints in the renderer and enables safe loopback audio.
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const pending = pendingScreenShareSelection;
+    pendingScreenShareSelection = null;
+
+    if (!pending) {
+      callback({});
+      return;
+    }
+
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ["screen", "window"],
+        thumbnailSize: { width: 1, height: 1 },
+      });
+      const source = sources.find((s) => s.id === pending.sourceId);
+      if (!source) {
+        callback({});
+        return;
+      }
+
+      const allowLoopbackAudio = pending.includeAudio && source.id.startsWith("screen:");
+      callback({
+        video: source,
+        ...(allowLoopbackAudio ? { audio: "loopback" as const } : {}),
+      });
+    } catch (err) {
+      console.error("[screen-share] Failed to resolve selected source:", err);
+      callback({});
+    }
+  }, {
+    useSystemPicker: false,
+  });
 
   // System tray — write to temp file to avoid Windows icon cache issues
   const trayImage = nativeImage.createFromPath(getTrayIconPath());
@@ -358,6 +394,11 @@ ipcMain.handle("get-desktop-sources", async () => {
     thumbnailDataUrl: s.thumbnail.toDataURL(),
     display_id: s.display_id,
   }));
+});
+
+ipcMain.handle("set-screen-share-source", (_event, sourceId: string, includeAudio: boolean) => {
+  pendingScreenShareSelection = { sourceId, includeAudio };
+  return true;
 });
 
 // ─── Identity Key Management (main process only) ────────────────────────────

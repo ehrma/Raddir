@@ -59,7 +59,7 @@ export interface ClientProduceMessage {
   transportId: string;
   kind: "audio" | "video";
   rtpParameters: object;
-  mediaType?: "mic" | "webcam" | "screen";
+  mediaType?: "mic" | "webcam" | "screen" | "screen-audio";
 }
 
 export interface ClientStopProducerMessage {
@@ -213,14 +213,14 @@ export interface ServerTransportCreatedMessage {
 export interface ServerProducedMessage {
   type: "produced";
   producerId: string;
-  mediaType?: "mic" | "webcam" | "screen";
+  mediaType?: "mic" | "webcam" | "screen" | "screen-audio";
 }
 
 export interface ServerNewProducerMessage {
   type: "new-producer";
   userId: string;
   producerId: string;
-  mediaType?: "mic" | "webcam" | "screen";
+  mediaType?: "mic" | "webcam" | "screen" | "screen-audio";
 }
 
 export interface ServerConsumeResultMessage {
@@ -235,7 +235,7 @@ export interface ServerProducerClosedMessage {
   type: "producer-closed";
   producerId: string;
   userId: string;
-  mediaType?: "mic" | "webcam" | "screen";
+  mediaType?: "mic" | "webcam" | "screen" | "screen-audio";
 }
 
 export interface ServerChatMessage {

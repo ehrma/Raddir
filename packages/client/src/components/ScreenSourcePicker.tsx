@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useVideoStore } from "../stores/videoStore";
 import { X, Monitor, AppWindow } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -14,11 +13,12 @@ export function ScreenSourcePicker({
   onSelect,
   onClose,
 }: {
-  onSelect: (sourceId: string) => void;
+  onSelect: (sourceId: string, includeAudio: boolean) => void;
   onClose: () => void;
 }) {
   const [sources, setSources] = useState<DesktopSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [includeAudio, setIncludeAudio] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +58,33 @@ export function ScreenSourcePicker({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="rounded-lg border border-surface-700 bg-surface-800/50 p-3">
+            <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
+              <div>
+                <p className="text-xs font-medium text-surface-200">Share system audio</p>
+                <p className="text-[10px] text-surface-400 mt-0.5">
+                  Include desktop sound in the screen stream (encrypted with E2EE).
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-pressed={includeAudio}
+                onClick={() => setIncludeAudio((v) => !v)}
+                className={cn(
+                  "w-10 h-5 rounded-full transition-colors flex-shrink-0",
+                  includeAudio ? "bg-accent" : "bg-surface-700"
+                )}
+              >
+                <div
+                  className={cn(
+                    "w-4 h-4 rounded-full bg-white transition-transform",
+                    includeAudio ? "translate-x-5" : "translate-x-0.5"
+                  )}
+                />
+              </button>
+            </label>
+          </div>
+
           {loading && (
             <p className="text-sm text-surface-400 text-center py-8">
               Loading sources...
@@ -81,6 +108,7 @@ export function ScreenSourcePicker({
                     key={source.id}
                     source={source}
                     onSelect={onSelect}
+                    includeAudio={includeAudio}
                   />
                 ))}
               </div>
@@ -98,6 +126,7 @@ export function ScreenSourcePicker({
                     key={source.id}
                     source={source}
                     onSelect={onSelect}
+                    includeAudio={includeAudio}
                   />
                 ))}
               </div>
@@ -112,13 +141,15 @@ export function ScreenSourcePicker({
 function SourceTile({
   source,
   onSelect,
+  includeAudio,
 }: {
   source: DesktopSource;
-  onSelect: (sourceId: string) => void;
+  onSelect: (sourceId: string, includeAudio: boolean) => void;
+  includeAudio: boolean;
 }) {
   return (
     <button
-      onClick={() => onSelect(source.id)}
+      onClick={() => onSelect(source.id, includeAudio)}
       className="group rounded-lg border border-surface-700 bg-surface-800 overflow-hidden hover:border-accent transition-colors text-left"
     >
       <div className="aspect-video bg-surface-950 flex items-center justify-center overflow-hidden">

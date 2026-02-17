@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld("raddir", {
   identityPinRemove: (serverId, userId) =>
     ipcRenderer.invoke("identity-pin-remove", serverId, userId),
   getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
+  setScreenShareSource: (sourceId, includeAudio) =>
+    ipcRenderer.invoke("set-screen-share-source", sourceId, includeAudio),
   onPttPressed: (callback) => {
     ipcRenderer.on("ptt-pressed", callback);
     return () => ipcRenderer.removeListener("ptt-pressed", callback);

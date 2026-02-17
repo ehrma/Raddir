@@ -21,6 +21,7 @@ export interface RaddirAPI {
   installAppUpdateNow: () => Promise<boolean>;
   getTheme: () => Promise<"dark" | "light">;
   getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnailDataUrl: string; display_id: string }>>;
+  setScreenShareSource: (sourceId: string, includeAudio: boolean) => Promise<boolean>;
   onPttPressed: (callback: () => void) => () => void;
   onMuteTogglePressed: (callback: () => void) => () => void;
   onDeafenTogglePressed: (callback: () => void) => () => void;

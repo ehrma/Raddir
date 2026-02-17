@@ -143,8 +143,30 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
     maxPayload: 64 * 1024, // 64 KB max message size
   });
 
+  // Heartbeat: force-close half-open sockets so disconnect cleanup runs reliably.
+  const heartbeatInterval = setInterval(() => {
+    for (const socket of wss.clients) {
+      const ws = socket as WebSocket & { isAlive?: boolean };
+      if (ws.isAlive === false) {
+        ws.terminate();
+        continue;
+      }
+      ws.isAlive = false;
+      try {
+        ws.ping();
+      } catch {
+        ws.terminate();
+      }
+    }
+  }, 15_000);
+
+  wss.on("close", () => {
+    clearInterval(heartbeatInterval);
+  });
+
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let client: ConnectedClient | null = null;
+    (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
     const remoteIp = (serverConfig.trustProxy
         ? req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()
         : undefined)
@@ -189,6 +211,10 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
       if (client) {
         handleDisconnect(client);
       }
+    });
+
+    ws.on("pong", () => {
+      (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
     });
 
     ws.on("error", (err) => {
@@ -581,6 +607,21 @@ async function handleLeaveChannel(client: ConnectedClient): Promise<void> {
   if (!client.channelId) return;
 
   const oldChannelId = client.channelId;
+
+  // Explicitly notify peers that this user's producers are gone before transport teardown.
+  // This prevents stale frozen video tiles if clients miss user-left timing.
+  const peer = getPeerTransports(client.userId);
+  if (peer) {
+    for (const producer of peer.producers.values()) {
+      broadcast(getChannelClients(oldChannelId), {
+        type: "producer-closed",
+        producerId: producer.id,
+        userId: client.userId,
+        mediaType: (producer.appData as any)?.mediaType,
+      }, client.userId);
+    }
+  }
+
   client.channelId = null;
 
   closePeerTransports(client.userId);
@@ -666,7 +707,7 @@ async function handleProduce(
       send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to share video" });
       return;
     }
-  } else if (mediaType === "screen") {
+  } else if (mediaType === "screen" || mediaType === "screen-audio") {
     if (!clientHasPermission(client, "screenShare", client.channelId)) {
       send(client.ws, { type: "error", code: "NO_PERMISSION", message: "No permission to share screen" });
       return;
@@ -946,12 +987,29 @@ function handleAssignRole(client: ConnectedClient, targetUserId: string, roleId:
 
 function handleDisconnect(client: ConnectedClient): void {
   if (client.channelId) {
+    const oldChannelId = client.channelId;
+
+    // Emit producer-closed for all active producers before tearing down transports.
+    const peer = getPeerTransports(client.userId);
+    if (peer) {
+      for (const producer of peer.producers.values()) {
+        broadcast(getChannelClients(oldChannelId), {
+          type: "producer-closed",
+          producerId: producer.id,
+          userId: client.userId,
+          mediaType: (producer.appData as any)?.mediaType,
+        }, client.userId);
+      }
+    }
+
     closePeerTransports(client.userId);
 
-    broadcast(getChannelClients(client.channelId), {
+    broadcast(getChannelClients(oldChannelId), {
       type: "user-left-channel",
       userId: client.userId,
     });
+
+    client.channelId = null;
   }
 
   if (client.serverId) {

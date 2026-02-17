@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ChannelTree } from "./ChannelTree";
 import { UserList } from "./UserList";
 import { VoiceControls } from "./VoiceControls";
@@ -14,12 +15,26 @@ import { Camera, CameraOff, Monitor, MonitorOff } from "lucide-react";
 import { cn } from "../lib/cn";
 
 export function MainLayout() {
+  const [showWebcamConfirm, setShowWebcamConfirm] = useState(false);
   const { currentChannelId, channels, serverName, serverDescription, serverIconUrl } = useServerStore();
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   useAudio();
   const { webcamActive, screenShareActive, showSourcePicker, toggleWebcam, toggleScreenShare, startScreenShareWithSource } = useVideo();
   const closeSourcePicker = () => useVideoStore.getState().setShowSourcePicker(false);
   const { can } = usePermissions();
+
+  const handleWebcamClick = () => {
+    if (webcamActive) {
+      toggleWebcam();
+      return;
+    }
+    setShowWebcamConfirm(true);
+  };
+
+  const confirmStartWebcam = () => {
+    setShowWebcamConfirm(false);
+    toggleWebcam();
+  };
 
   const iconSrc = serverIconUrl ? `${getApiBase()}${serverIconUrl}` : null;
 
@@ -73,7 +88,7 @@ export function MainLayout() {
               <div className="ml-auto flex items-center gap-1">
                 <span title={!can("video") ? "You do not have sufficient rights to use video" : webcamActive ? "Stop Camera" : "Start Camera"}>
                   <button
-                    onClick={can("video") ? toggleWebcam : undefined}
+                    onClick={can("video") ? handleWebcamClick : undefined}
                     disabled={!can("video")}
                     className={cn(
                       "p-1.5 rounded-md transition-colors",
@@ -130,6 +145,37 @@ export function MainLayout() {
         onSelect={startScreenShareWithSource}
         onClose={closeSourcePicker}
       />
+    )}
+    {showWebcamConfirm && (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowWebcamConfirm(false)}>
+        <div
+          className="w-full max-w-sm bg-surface-900 rounded-xl border border-surface-700 shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-4 py-3 border-b border-surface-800">
+            <h2 className="text-sm font-semibold text-surface-200">Start webcam?</h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-xs text-surface-400 leading-relaxed">
+              Do you really want to share your webcam in this channel?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowWebcamConfirm(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-surface-300 bg-surface-800 hover:bg-surface-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStartWebcam}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-green-600 hover:bg-green-500 transition-colors"
+              >
+                Share webcam
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );
