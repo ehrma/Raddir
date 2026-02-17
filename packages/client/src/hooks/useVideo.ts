@@ -4,7 +4,11 @@ import { useServerStore } from "../stores/serverStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { getSignalingClient } from "./useConnection";
-import type { ServerNewProducerMessage, ServerProducerClosedMessage } from "@raddir/shared";
+import type {
+  ServerNewProducerMessage,
+  ServerProducerClosedMessage,
+  ServerUserLeftChannelMessage,
+} from "@raddir/shared";
 
 const RESOLUTION_MAP = {
   "480p": { width: 854, height: 480 },
@@ -14,6 +18,10 @@ const RESOLUTION_MAP = {
 
 let mediaClientRef: import("../lib/media-client").MediaClient | null = null;
 const producerMediaTypes = new Map<string, "webcam" | "screen">();
+
+function isVideoMediaType(mediaType: string | undefined): mediaType is "webcam" | "screen" {
+  return mediaType === "webcam" || mediaType === "screen";
+}
 
 export function setVideoMediaClient(mc: import("../lib/media-client").MediaClient | null): void {
   mediaClientRef = mc;
@@ -36,9 +44,9 @@ export function useVideo() {
       const data = msg as ServerNewProducerMessage;
       const currentUserId = useServerStore.getState().userId;
       if (data.userId === currentUserId) return;
-      if (!data.mediaType || data.mediaType === "mic") return; // audio handled by useAudio
+      if (!isVideoMediaType(data.mediaType)) return; // audio handled by useAudio
 
-      const mediaType = data.mediaType as "webcam" | "screen";
+      const mediaType = data.mediaType;
       console.log("[video] new-producer from", data.userId, mediaType, data.producerId);
       producerMediaTypes.set(data.producerId, mediaType);
 
@@ -52,6 +60,10 @@ export function useVideo() {
         console.log("[video] consume() resolved, consumer:", consumer ? consumer.id : "null", "track:", consumer?.track?.kind, consumer?.track?.readyState);
         if (!consumer) return;
         const stream = new MediaStream([consumer.track]);
+        consumer.track.onended = () => {
+          console.log("[video] remote track ended for", data.userId, mediaType);
+          useVideoStore.getState().removeRemoteVideo(data.userId, mediaType);
+        };
         useVideoStore.getState().addRemoteVideo(data.userId, mediaType, stream, consumer.id);
         console.log("[video] Added remote video for", data.userId, mediaType, "consumerId:", consumer.id);
       }).catch((err) => {
@@ -61,15 +73,21 @@ export function useVideo() {
 
     const unsubProducerClosed = signaling.on("producer-closed", (msg) => {
       const data = msg as ServerProducerClosedMessage;
-      if (!data.mediaType || data.mediaType === "mic") return;
-      const mediaType = data.mediaType as "webcam" | "screen";
+      if (!isVideoMediaType(data.mediaType)) return;
+      const mediaType = data.mediaType;
       console.log("[video] producer-closed from", data.userId, mediaType);
       useVideoStore.getState().removeRemoteVideo(data.userId, mediaType);
+    });
+
+    const unsubUserLeft = signaling.on("user-left-channel", (msg) => {
+      const data = msg as ServerUserLeftChannelMessage;
+      useVideoStore.getState().removeAllRemoteVideosForUser(data.userId);
     });
 
     return () => {
       unsubNewProducer();
       unsubProducerClosed();
+      unsubUserLeft();
     };
   }, []);
 
@@ -111,7 +129,7 @@ export function useVideo() {
     console.log("[video] Webcam stopped");
   }, []);
 
-  const startScreenShareWithSource = useCallback(async (sourceId: string) => {
+  const startScreenShareWithSource = useCallback(async (sourceId: string, includeAudio = false) => {
     if (!mediaClientRef) return;
     if (!useVoiceStore.getState().e2eeActive) {
       console.error("[video] Cannot start screen share — E2EE key not established");
@@ -120,15 +138,24 @@ export function useVideo() {
     }
     let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          mandatory: {
-            chromeMediaSource: "desktop",
-            chromeMediaSourceId: sourceId,
-          },
-        } as any,
+      const canAttemptSystemAudio = includeAudio && sourceId.startsWith("screen:");
+      if (includeAudio && !sourceId.startsWith("screen:")) {
+        console.warn("[video] System audio is only available for full-screen sources in this build.");
+      }
+
+      const sourceSet = await window.raddir?.setScreenShareSource(sourceId, canAttemptSystemAudio);
+      if (!sourceSet) {
+        throw new Error("Failed to prepare selected screen source");
+      }
+
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: canAttemptSystemAudio,
       });
+
+      if (canAttemptSystemAudio && stream.getAudioTracks().length === 0) {
+        console.warn("[video] Selected source did not provide system audio. Screen video will continue without audio.");
+      }
 
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
@@ -142,6 +169,15 @@ export function useVideo() {
         maxBitrate: screenShareBitrate * 1000,
         maxFramerate: screenShareFps,
       });
+
+      if (canAttemptSystemAudio && stream.getAudioTracks().length > 0) {
+        try {
+          await mediaClientRef.produceScreenAudio(new MediaStream([stream.getAudioTracks()[0]!]))
+        } catch (audioErr) {
+          console.warn("[video] Screen share started without system audio:", audioErr);
+        }
+      }
+
       useVideoStore.getState().setLocalScreenStream(stream);
       useVideoStore.getState().setScreenShareActive(true);
       useVideoStore.getState().setShowSourcePicker(false);
@@ -162,6 +198,7 @@ export function useVideo() {
   const stopScreenShare = useCallback(() => {
     if (!mediaClientRef) return;
     mediaClientRef.stopProducer("screen");
+    mediaClientRef.stopProducer("screen-audio");
     const stream = useVideoStore.getState().localScreenStream;
     if (stream) {
       for (const track of stream.getTracks()) track.stop();

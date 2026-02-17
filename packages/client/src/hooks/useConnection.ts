@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useServerStore } from "../stores/serverStore";
 import { useVoiceStore } from "../stores/voiceStore";
+import { useVideoStore } from "../stores/videoStore";
 import { SignalingClient } from "../lib/signaling-client";
 import { KeyManager } from "../lib/e2ee/key-manager";
 import { normalizeServerUrl } from "../lib/normalize-url";
@@ -84,6 +85,7 @@ export function useConnection() {
 
     signalingClient.onDisconnect(() => {
       store.getState().reset();
+      useVideoStore.getState().clearAll();
       keyManager?.reset();
       setConnecting(false);
     });
@@ -143,11 +145,16 @@ export function useConnection() {
     signalingClient.on("user-left-channel", (msg) => {
       const data = msg as ServerUserLeftChannelMessage;
       store.getState().updateMember(data.userId, { channelId: null });
+      useVideoStore.getState().removeAllRemoteVideosForUser(data.userId);
       keyManager?.onMemberLeft(data.userId);
     });
 
     signalingClient.on("user-moved", (msg: any) => {
       store.getState().updateMember(msg.userId, { channelId: msg.channelId });
+      const currentChannelId = store.getState().currentChannelId;
+      if (msg.channelId !== currentChannelId) {
+        useVideoStore.getState().removeAllRemoteVideosForUser(msg.userId);
+      }
     });
 
     signalingClient.on("channel-created", (msg: any) => {
@@ -166,6 +173,12 @@ export function useConnection() {
     signalingClient.on("user-updated", (msg) => {
       const data = msg as ServerUserUpdatedMessage;
       store.getState().updateMember(data.userId, data.updates as any);
+      if (Object.prototype.hasOwnProperty.call(data.updates, "channelId")) {
+        const currentChannelId = store.getState().currentChannelId;
+        if ((data.updates as any).channelId !== currentChannelId) {
+          useVideoStore.getState().removeAllRemoteVideosForUser(data.userId);
+        }
+      }
     });
 
     signalingClient.on("e2ee", (msg) => {

@@ -392,8 +392,9 @@ export function useAudio() {
       const data = msg as ServerNewProducerMessage;
       const currentUserId = useServerStore.getState().userId;
       if (data.userId === currentUserId) return;
-      // Only handle mic producers — video producers are handled by useVideo
-      if (data.mediaType && data.mediaType !== "mic") return;
+      // Only handle audio producers (mic and screen-share audio).
+      // Video producers are handled by useVideo.
+      if (data.mediaType && data.mediaType !== "mic" && data.mediaType !== "screen-audio") return;
 
       console.log("[audio] new-producer from", data.userId, data.producerId, "ready:", mediaReady);
 

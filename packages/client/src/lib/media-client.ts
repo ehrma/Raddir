@@ -1,29 +1,36 @@
 import { Device } from "mediasoup-client";
 import type { Transport, Producer, Consumer, RtpCapabilities, DtlsParameters, MediaKind, RtpParameters } from "mediasoup-client/types";
 import type { SignalingClient } from "./signaling-client";
-import type {
+import {
   ServerTransportCreatedMessage,
   ServerProducedMessage,
   ServerConsumeResultMessage,
 } from "@raddir/shared";
 import { applyEncryptTransform, applyDecryptTransform } from "./e2ee/frame-crypto";
 
+type OutgoingMediaType = "mic" | "webcam" | "screen" | "screen-audio";
+
+interface RoutedAudioConsumer {
+  userId: string;
+  gain: GainNode;
+  audio: HTMLAudioElement;
+}
+
 export class MediaClient {
   private device: Device;
   private sendTransport: Transport | null = null;
   private recvTransport: Transport | null = null;
-  private producers = new Map<string, Producer>(); // keyed by mediaType: "mic" | "webcam" | "screen"
+  private producers = new Map<OutgoingMediaType, Producer>();
   private consumers = new Map<string, Consumer>();
   private signaling: SignalingClient;
   private audioContext: AudioContext;
-  private gainNodes = new Map<string, GainNode>();
-  private audioElements = new Map<string, HTMLAudioElement>();
+  private audioConsumers = new Map<string, RoutedAudioConsumer>(); // keyed by consumerId
   private masterVolume = 1.0;
   private userVolumes = new Map<string, number>();
   private outputDeviceId = "default";
   private onConsumerCreated?: (userId: string, consumer: Consumer, stream: MediaStream) => void;
   private onVideoConsumerCreated?: (userId: string, consumer: Consumer, stream: MediaStream, mediaType: string) => void;
-  private pendingMediaType: "mic" | "webcam" | "screen" = "mic";
+  private pendingMediaType: OutgoingMediaType = "mic";
   private micSendTrack: MediaStreamTrack | null = null;
 
   constructor(signaling: SignalingClient) {
@@ -206,6 +213,50 @@ export class MediaClient {
     return producer;
   }
 
+  async produceScreenAudio(stream: MediaStream): Promise<Producer | null> {
+    if (!this.sendTransport) {
+      await this.createSendTransport();
+    }
+
+    const existing = this.producers.get("screen-audio");
+    if (existing) {
+      this.signaling.send({ type: "stop-producer", producerId: existing.id });
+      existing.close();
+      this.producers.delete("screen-audio");
+    }
+
+    const track = stream.getAudioTracks()[0];
+    if (!track) return null;
+
+    this.pendingMediaType = "screen-audio";
+    const producer = await this.sendTransport!.produce({
+      track,
+      disableTrackOnPause: false,
+      zeroRtpOnPause: true,
+      codecOptions: {
+        opusStereo: true,
+        opusDtx: true,
+        opusFec: true,
+        opusMaxPlaybackRate: 48000,
+      },
+      encodings: [{ maxBitrate: 128000 }],
+    });
+
+    this.producers.set("screen-audio", producer);
+
+    const sender = producer.rtpSender;
+    if (sender) {
+      applyEncryptTransform(sender);
+    }
+
+    producer.on("transportclose", () => {
+      console.log("[media] screen-audio producer transport closed");
+      this.producers.delete("screen-audio");
+    });
+
+    return producer;
+  }
+
   setPreferredLayers(consumerId: string, spatialLayer: number, temporalLayer?: number): void {
     this.signaling.send({
       type: "set-preferred-layers",
@@ -215,7 +266,7 @@ export class MediaClient {
     });
   }
 
-  stopProducer(mediaType: string): void {
+  stopProducer(mediaType: OutgoingMediaType): void {
     const producer = this.producers.get(mediaType);
     if (!producer) return;
 
@@ -229,11 +280,11 @@ export class MediaClient {
     }
   }
 
-  getProducerId(mediaType: string): string | undefined {
+  getProducerId(mediaType: OutgoingMediaType): string | undefined {
     return this.producers.get(mediaType)?.id;
   }
 
-  hasProducer(mediaType: string): boolean {
+  hasProducer(mediaType: OutgoingMediaType): boolean {
     return this.producers.has(mediaType);
   }
 
@@ -271,14 +322,25 @@ export class MediaClient {
 
             const stream = new MediaStream([consumer.track]);
 
+            const cleanupConsumer = () => {
+              this.consumers.delete(consumer.id);
+              const routed = this.audioConsumers.get(consumer.id);
+              if (routed) {
+                try { routed.gain.disconnect(); } catch {}
+                routed.audio.srcObject = null;
+                routed.audio.remove();
+                this.audioConsumers.delete(consumer.id);
+              }
+            };
+
             if (result.kind === "video") {
               // Video consumer — emit via callback, no audio routing
               console.log("[media] Sending resume-consumer for video", consumer.id);
               this.signaling.send({ type: "resume-consumer", consumerId: consumer.id });
 
-              consumer.on("transportclose", () => {
-                this.consumers.delete(consumer.id);
-              });
+              consumer.on("transportclose", cleanupConsumer);
+              consumer.on("trackended", cleanupConsumer);
+              consumer.on("@close", cleanupConsumer);
 
               this.onVideoConsumerCreated?.(userId, consumer, stream, "video");
               resolve(consumer);
@@ -293,7 +355,6 @@ export class MediaClient {
               gain.gain.value = this.masterVolume * userVol;
               source.connect(gain);
               gain.connect(this.audioContext.destination);
-              this.gainNodes.set(userId, gain);
 
               // Hidden audio element to keep the WebRTC track alive
               const audio = document.createElement("audio");
@@ -306,19 +367,15 @@ export class MediaClient {
               }
               document.body.appendChild(audio);
               audio.play().catch(() => {});
-              this.audioElements.set(userId, audio);
+              this.audioConsumers.set(consumer.id, { userId, gain, audio });
 
               // Resume consumer on server side (it starts paused)
               console.log("[media] Sending resume-consumer for", consumer.id);
               this.signaling.send({ type: "resume-consumer", consumerId: consumer.id });
 
-              consumer.on("transportclose", () => {
-                this.consumers.delete(consumer.id);
-                this.gainNodes.delete(userId);
-                const el = this.audioElements.get(userId);
-                if (el) { el.srcObject = null; el.remove(); }
-                this.audioElements.delete(userId);
-              });
+              consumer.on("transportclose", cleanupConsumer);
+              consumer.on("trackended", cleanupConsumer);
+              consumer.on("@close", cleanupConsumer);
 
               this.onConsumerCreated?.(userId, consumer, stream);
               resolve(consumer);
@@ -334,9 +391,10 @@ export class MediaClient {
 
   setUserVolume(userId: string, volume: number): void {
     this.userVolumes.set(userId, Math.max(0, volume));
-    const gain = this.gainNodes.get(userId);
-    if (gain) {
-      gain.gain.value = this.masterVolume * Math.max(0, volume);
+    const safeVolume = Math.max(0, volume);
+    for (const routed of this.audioConsumers.values()) {
+      if (routed.userId !== userId) continue;
+      routed.gain.gain.value = this.masterVolume * safeVolume;
     }
   }
 
@@ -355,7 +413,8 @@ export class MediaClient {
       console.warn("[media] AudioContext.setSinkId not available");
     }
     // Route all existing audio elements
-    for (const audio of this.audioElements.values()) {
+    for (const routed of this.audioConsumers.values()) {
+      const audio = routed.audio;
       if (typeof (audio as any).setSinkId === "function") {
         (audio as any).setSinkId(deviceId).catch(() => {});
       }
@@ -364,9 +423,9 @@ export class MediaClient {
 
   setMasterVolume(volume: number): void {
     this.masterVolume = Math.max(0, volume);
-    for (const [userId, gain] of this.gainNodes.entries()) {
-      const userVol = this.userVolumes.get(userId) ?? 1.0;
-      gain.gain.value = this.masterVolume * userVol;
+    for (const routed of this.audioConsumers.values()) {
+      const userVol = this.userVolumes.get(routed.userId) ?? 1.0;
+      routed.gain.gain.value = this.masterVolume * userVol;
     }
   }
 
@@ -426,12 +485,11 @@ export class MediaClient {
     this.sendTransport?.close();
     this.recvTransport?.close();
     this.consumers.clear();
-    this.gainNodes.clear();
-    for (const el of this.audioElements.values()) {
-      el.srcObject = null;
-      el.remove();
+    for (const routed of this.audioConsumers.values()) {
+      routed.audio.srcObject = null;
+      routed.audio.remove();
     }
-    this.audioElements.clear();
+    this.audioConsumers.clear();
     this.sendTransport = null;
     this.recvTransport = null;
   }
