@@ -14,6 +14,28 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean
   );
 }
 
+const MIN_METER_DB = -60;
+const MAX_METER_DB = 0;
+const METER_ATTACK = 0.32;
+const METER_HOLD_MS = 280;
+const METER_DECAY_DB_PER_TICK = 0.12;
+
+function clampMeterDb(value: number): number {
+  return Math.max(MIN_METER_DB, Math.min(MAX_METER_DB, value));
+}
+
+function meterDbToPct(value: number): number {
+  return Math.max(0, Math.min(100, ((clampMeterDb(value) - MIN_METER_DB) / (MAX_METER_DB - MIN_METER_DB)) * 100));
+}
+
+function suggestVadThresholdFromNoisePeak(noisePeakDb: number): number | null {
+  if (!Number.isFinite(noisePeakDb)) return null;
+  // Keep VA 3 dB below measured noise peak (more negative in dBFS)
+  // so it is less strict and easier to trigger.
+  const suggested = clampMeterDb(noisePeakDb - 3);
+  return Math.round(suggested);
+}
+
 export function AudioSettings() {
   const {
     inputDeviceId, outputDeviceId, voiceActivation, vadThreshold,
@@ -160,8 +182,14 @@ function MicTest() {
   const autoGainControl = useSettingsStore((s) => s.autoGainControl);
   const voiceActivation = useSettingsStore((s) => s.voiceActivation);
   const vadThreshold = useSettingsStore((s) => s.vadThreshold);
+  const setVadThreshold = useSettingsStore((s) => s.setVadThreshold);
   const [testing, setTesting] = useState(false);
   const [levelDb, setLevelDb] = useState(-Infinity);
+  const [peakDb, setPeakDb] = useState(-Infinity);
+  const [noiseFloorDb, setNoiseFloorDb] = useState(-Infinity);
+  const [noiseCeilingDb, setNoiseCeilingDb] = useState(-Infinity);
+  const [suggestedThreshold, setSuggestedThreshold] = useState<number | null>(null);
+  const [relayEnabled, setRelayEnabled] = useState(false);
   const [speaking, setSpeaking] = useState(false);
 
   // All mutable state lives in a single ref to survive React StrictMode
@@ -170,12 +198,71 @@ function MicTest() {
     interval: ReturnType<typeof setInterval> | null;
     ownStream: MediaStream | null;
     ownCtx: AudioContext | null;
+    activeCtx: AudioContext | null;
+    source: MediaStreamAudioSourceNode | null;
+    analyser: AnalyserNode | null;
+    relayGain: GainNode | null;
+    smoothedDb: number;
+    meterHoldUntil: number;
+    peakDb: number;
+    noiseFloorDb: number;
+    noiseCeilingDb: number;
+    speakingForMeter: boolean;
     lastUiUpdate: number;
-  }>({ interval: null, ownStream: null, ownCtx: null, lastUiUpdate: 0 });
+  }>({
+    interval: null,
+    ownStream: null,
+    ownCtx: null,
+    activeCtx: null,
+    source: null,
+    analyser: null,
+    relayGain: null,
+    smoothedDb: -Infinity,
+    meterHoldUntil: 0,
+    peakDb: -Infinity,
+    noiseFloorDb: -Infinity,
+    noiseCeilingDb: -Infinity,
+    speakingForMeter: false,
+    lastUiUpdate: 0,
+  });
+
+  const applyRelayRouting = useCallback(() => {
+    const { source, activeCtx, relayGain } = stateRef.current;
+    if (!source || !activeCtx) return;
+
+    if (relayEnabled) {
+      if (!relayGain) {
+        const gain = activeCtx.createGain();
+        gain.gain.value = 0.85;
+        source.connect(gain);
+        gain.connect(activeCtx.destination);
+        stateRef.current.relayGain = gain;
+      }
+      return;
+    }
+
+    if (relayGain) {
+      try {
+        source.disconnect(relayGain);
+      } catch {}
+      try {
+        relayGain.disconnect();
+      } catch {}
+      stateRef.current.relayGain = null;
+    }
+  }, [relayEnabled]);
 
   const startTest = useCallback(async () => {
     // Already running — don't start a second one
     if (stateRef.current.interval) return;
+
+    setRelayEnabled(false);
+    setLevelDb(-Infinity);
+    setPeakDb(-Infinity);
+    setNoiseFloorDb(-Infinity);
+    setNoiseCeilingDb(-Infinity);
+    setSuggestedThreshold(null);
+    setSpeaking(false);
 
     try {
       // Reuse the live audio context & stream if already in a voice channel
@@ -210,6 +297,16 @@ function MicTest() {
       analyser.smoothingTimeConstant = 0.3;
       source.connect(analyser);
 
+      stateRef.current.activeCtx = ctx;
+      stateRef.current.source = source;
+      stateRef.current.analyser = analyser;
+      stateRef.current.smoothedDb = -Infinity;
+      stateRef.current.meterHoldUntil = 0;
+      stateRef.current.peakDb = -Infinity;
+      stateRef.current.noiseFloorDb = -Infinity;
+      stateRef.current.noiseCeilingDb = -Infinity;
+      stateRef.current.speakingForMeter = false;
+
       const dataArray = new Float32Array(analyser.fftSize);
 
       stateRef.current.interval = setInterval(() => {
@@ -220,13 +317,74 @@ function MicTest() {
           sum += dataArray[i] * dataArray[i];
         }
         const rms = Math.sqrt(sum / dataArray.length);
-        const db = rms > 0 ? 20 * Math.log10(rms) : -100;
-
+        const rawDb = rms > 0 ? 20 * Math.log10(rms) : -100;
+        const clampedDb = clampMeterDb(rawDb);
         const now = performance.now();
+
+        const prevSmoothed = stateRef.current.smoothedDb;
+        let meterDb = Number.isFinite(prevSmoothed) ? prevSmoothed : clampedDb;
+        if (clampedDb >= meterDb) {
+          meterDb = meterDb + (clampedDb - meterDb) * METER_ATTACK;
+          stateRef.current.meterHoldUntil = now + METER_HOLD_MS;
+        } else if (now < stateRef.current.meterHoldUntil) {
+          meterDb = meterDb;
+        } else {
+          meterDb = Math.max(clampedDb, meterDb - METER_DECAY_DB_PER_TICK);
+        }
+        stateRef.current.smoothedDb = meterDb;
+
+        const threshold = useSettingsStore.getState().vadThreshold;
+        const wasSpeaking = stateRef.current.speakingForMeter;
+        const speakingNow = wasSpeaking
+          ? meterDb > threshold - 2
+          : meterDb > threshold + 2;
+        stateRef.current.speakingForMeter = speakingNow;
+
+        const nextPeak = Number.isFinite(stateRef.current.peakDb)
+          ? Math.max(stateRef.current.peakDb, meterDb)
+          : meterDb;
+
+        const prevNoise = stateRef.current.noiseFloorDb;
+        let nextNoise = prevNoise;
+        if (!speakingNow) {
+          nextNoise = Number.isFinite(prevNoise)
+            ? prevNoise + (meterDb - prevNoise) * (meterDb < prevNoise ? 0.25 : 0.02)
+            : meterDb;
+        } else if (Number.isFinite(prevNoise)) {
+          nextNoise = Math.max(MIN_METER_DB, prevNoise - 0.01);
+        }
+
+        const prevNoiseCeiling = stateRef.current.noiseCeilingDb;
+        let nextNoiseCeiling = prevNoiseCeiling;
+        if (!speakingNow) {
+          nextNoiseCeiling = Number.isFinite(prevNoiseCeiling)
+            ? Math.max(prevNoiseCeiling, meterDb)
+            : meterDb;
+        }
+
+        stateRef.current.peakDb = nextPeak;
+        stateRef.current.noiseFloorDb = nextNoise;
+        stateRef.current.noiseCeilingDb = nextNoiseCeiling;
+
+        const thresholdSuggestion = suggestVadThresholdFromNoisePeak(nextNoiseCeiling);
+
+        if (relayEnabled && stateRef.current.relayGain && stateRef.current.activeCtx) {
+          const targetGain = speakingNow ? 0.85 : 0;
+          stateRef.current.relayGain.gain.setTargetAtTime(
+            targetGain,
+            stateRef.current.activeCtx.currentTime,
+            speakingNow ? 0.02 : 0.08,
+          );
+        }
+
         if (now - stateRef.current.lastUiUpdate > 50) {
           stateRef.current.lastUiUpdate = now;
-          setLevelDb(db);
-          setSpeaking(db > useSettingsStore.getState().vadThreshold);
+          setLevelDb(meterDb);
+          setPeakDb(nextPeak);
+          setNoiseFloorDb(nextNoise);
+          setNoiseCeilingDb(nextNoiseCeiling);
+          setSuggestedThreshold(thresholdSuggestion);
+          setSpeaking(speakingNow);
         }
       }, 16);
 
@@ -234,13 +392,38 @@ function MicTest() {
     } catch (err) {
       console.error("[mic-test] Failed to start:", err);
     }
-  }, [inputDeviceId, echoCancellation, noiseSuppression, autoGainControl]);
+  }, [inputDeviceId, echoCancellation, noiseSuppression, autoGainControl, relayEnabled]);
 
   const stopTest = useCallback(() => {
     if (stateRef.current.interval !== null) {
       clearInterval(stateRef.current.interval);
       stateRef.current.interval = null;
     }
+
+    if (stateRef.current.relayGain && stateRef.current.source) {
+      try {
+        stateRef.current.source.disconnect(stateRef.current.relayGain);
+      } catch {}
+      try {
+        stateRef.current.relayGain.disconnect();
+      } catch {}
+    }
+    stateRef.current.relayGain = null;
+
+    if (stateRef.current.source) {
+      try {
+        stateRef.current.source.disconnect();
+      } catch {}
+      stateRef.current.source = null;
+    }
+    if (stateRef.current.analyser) {
+      try {
+        stateRef.current.analyser.disconnect();
+      } catch {}
+      stateRef.current.analyser = null;
+    }
+    stateRef.current.activeCtx = null;
+
     // Only stop resources we own (never the live channel's stream/context)
     if (stateRef.current.ownStream) {
       for (const track of stateRef.current.ownStream.getTracks()) track.stop();
@@ -252,8 +435,18 @@ function MicTest() {
     }
     setTesting(false);
     setLevelDb(-Infinity);
+    setPeakDb(-Infinity);
+    setNoiseFloorDb(-Infinity);
+    setNoiseCeilingDb(-Infinity);
+    setSuggestedThreshold(null);
+    setRelayEnabled(false);
     setSpeaking(false);
   }, []);
+
+  useEffect(() => {
+    if (!testing) return;
+    applyRelayRouting();
+  }, [testing, relayEnabled, applyRelayRouting]);
 
   // Cleanup on unmount — safe because stateRef persists across StrictMode remounts
   useEffect(() => {
@@ -267,13 +460,15 @@ function MicTest() {
   }, []);
 
   // Map dB to percentage for the bar (range: -60 to 0 dB)
-  const levelPct = Math.max(0, Math.min(100, ((levelDb + 60) / 60) * 100));
-  const thresholdPct = Math.max(0, Math.min(100, ((vadThreshold + 60) / 60) * 100));
+  const levelPct = meterDbToPct(levelDb);
+  const peakPct = meterDbToPct(peakDb);
+  const thresholdPct = meterDbToPct(vadThreshold);
+  const suggestedPct = suggestedThreshold !== null ? meterDbToPct(suggestedThreshold) : null;
 
   return (
     <div className="space-y-3">
       <p className="text-[10px] text-surface-500">
-        Test your microphone and dial in the voice activation threshold. The green bar shows your current mic level.
+        Test your microphone and dial in voice activation. The bar shows current loudness, remembers your peak, and suggests a VA threshold.
       </p>
 
       {!testing && (
@@ -286,7 +481,7 @@ function MicTest() {
       )}
 
       {testing && (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {/* Level meter */}
           <div className="relative h-6 bg-surface-800 rounded-lg overflow-hidden">
             {/* Level bar */}
@@ -297,16 +492,28 @@ function MicTest() {
               style={{ width: `${levelPct}%` }}
             />
 
+            {/* Peak marker */}
+            {Number.isFinite(peakDb) && (
+              <div
+                className="absolute inset-y-0 w-0.5 bg-red-400/90"
+                style={{ left: `${peakPct}%` }}
+              />
+            )}
+
             {/* VAD threshold marker */}
-            {voiceActivation && (
+            {voiceActivation && Number.isFinite(vadThreshold) && (
               <div
                 className="absolute inset-y-0 w-0.5 bg-yellow-400/80"
                 style={{ left: `${thresholdPct}%` }}
-              >
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] text-yellow-400 whitespace-nowrap">
-                  {vadThreshold} dB
-                </div>
-              </div>
+              />
+            )}
+
+            {/* Suggested threshold marker */}
+            {suggestedPct !== null && (
+              <div
+                className="absolute inset-y-0 w-0.5 bg-cyan-400/85"
+                style={{ left: `${suggestedPct}%` }}
+              />
             )}
 
             {/* dB readout */}
@@ -315,6 +522,33 @@ function MicTest() {
                 {levelDb > -100 ? `${levelDb.toFixed(1)} dB` : "—"}
               </span>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-surface-400">
+            <span>Current: {Number.isFinite(levelDb) ? `${levelDb.toFixed(1)} dB` : "—"}</span>
+            <span>Peak: {Number.isFinite(peakDb) ? `${peakDb.toFixed(1)} dB` : "—"}</span>
+            <span>Noise floor: {Number.isFinite(noiseFloorDb) ? `${noiseFloorDb.toFixed(1)} dB` : "—"}</span>
+            <span>Noise peak: {Number.isFinite(noiseCeilingDb) ? `${noiseCeilingDb.toFixed(1)} dB` : "—"}</span>
+            <span>
+              Suggested VA: {suggestedThreshold !== null ? `${suggestedThreshold} dB` : "Speak a bit louder to calibrate"}
+            </span>
+          </div>
+
+          {suggestedThreshold !== null && (
+            <button
+              onClick={() => setVadThreshold(suggestedThreshold)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30"
+            >
+              Use suggested threshold ({suggestedThreshold} dB)
+            </button>
+          )}
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-surface-300">Relay mic to output</p>
+              <p className="text-[10px] text-surface-500">Off by default. Enable to hear your own voice during test (headphones recommended).</p>
+            </div>
+            <Toggle enabled={relayEnabled} onChange={setRelayEnabled} />
           </div>
 
           {/* Speaking indicator */}
