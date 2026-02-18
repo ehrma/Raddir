@@ -1,7 +1,7 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage, session } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, nativeTheme, Tray, Menu, nativeImage, safeStorage, session, shell } from "electron";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { generateKeyPairSync, createSign, createPrivateKey } from "node:crypto";
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from "electron-updater";
 
@@ -13,6 +13,15 @@ let tray: Tray | null = null;
 let trustedServerHost: string | null = null;
 let hasDownloadedUpdate = false;
 let pendingScreenShareSelection: { sourceId: string; includeAudio: boolean } | null = null;
+
+const CHAT_IMAGE_ALLOWED_TYPES: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+const CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const CHAT_PREVIEW_TTL_MS = 10 * 60 * 1000;
 
 type ShortcutAction = "ptt" | "mute-toggle" | "deafen-toggle";
 const shortcutAccelerators = new Map<ShortcutAction, string>();
@@ -380,6 +389,81 @@ ipcMain.handle("safe-storage-decrypt", (_event, encrypted: string) => {
 // IPC: Get system theme
 ipcMain.handle("get-theme", () => {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+});
+
+ipcMain.handle("open-external-url", async (_event, rawUrl: string) => {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return false;
+    }
+    await shell.openExternal(parsed.toString());
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle("open-chat-image", async (_event, mimeType: string, dataBase64: string) => {
+  try {
+    const ext = CHAT_IMAGE_ALLOWED_TYPES[mimeType];
+    if (!ext) {
+      return false;
+    }
+
+    if (!/^[A-Za-z0-9+/=]+$/.test(dataBase64)) {
+      return false;
+    }
+
+    const raw = Buffer.from(dataBase64, "base64");
+    if (raw.length === 0 || raw.length > CHAT_IMAGE_MAX_BYTES) {
+      return false;
+    }
+
+    const previewsDir = join(app.getPath("temp"), "raddir-chat-previews");
+    if (!existsSync(previewsDir)) {
+      mkdirSync(previewsDir, { recursive: true });
+    }
+
+    const now = Date.now();
+    for (const name of readdirSync(previewsDir)) {
+      const fullPath = join(previewsDir, name);
+      try {
+        const stats = statSync(fullPath);
+        if (!stats.isFile()) continue;
+        if (now - stats.mtimeMs > CHAT_PREVIEW_TTL_MS) {
+          unlinkSync(fullPath);
+        }
+      } catch {
+        // Ignore cleanup failures
+      }
+    }
+
+    const filePath = join(previewsDir, `preview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`);
+    const safeDataBase64 = raw.toString("base64");
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raddir Chat Image</title>
+    <style>
+      html, body { margin: 0; background: #111; }
+      body { min-height: 100vh; display: grid; place-items: center; }
+      img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+    </style>
+  </head>
+  <body>
+    <img src="data:${mimeType};base64,${safeDataBase64}" alt="Chat image" />
+  </body>
+</html>`;
+
+    writeFileSync(filePath, html, "utf-8");
+    await shell.openExternal(pathToFileURL(filePath).toString());
+    return true;
+  } catch {
+    return false;
+  }
 });
 
 // IPC: Get desktop sources for screen sharing (Electron desktopCapturer)

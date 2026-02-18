@@ -22,6 +22,8 @@ export interface RaddirAPI {
   getTheme: () => Promise<"dark" | "light">;
   getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnailDataUrl: string; display_id: string }>>;
   setScreenShareSource: (sourceId: string, includeAudio: boolean) => Promise<boolean>;
+  openExternalUrl: (url: string) => Promise<boolean>;
+  openChatImage: (mimeType: string, dataBase64: string) => Promise<boolean>;
   onPttPressed: (callback: () => void) => () => void;
   onMuteTogglePressed: (callback: () => void) => () => void;
   onDeafenTogglePressed: (callback: () => void) => () => void;

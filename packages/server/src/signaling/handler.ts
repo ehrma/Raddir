@@ -98,6 +98,8 @@ const MSG_RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
   general:  { max: 30, windowMs: 1_000 },
 };
 
+const CHAT_MAX_CIPHERTEXT_B64_LENGTH = 4 * 1024 * 1024;
+
 function getMsgCategory(type: string): string {
   switch (type) {
     case "chat":
@@ -140,7 +142,7 @@ export function setupSignaling(httpServer: HttpServer, config: RaddirConfig): vo
   const wss = new WebSocketServer({
     server: httpServer,
     path: "/ws",
-    maxPayload: 64 * 1024, // 64 KB max message size
+    maxPayload: 4 * 1024 * 1024, // 4 MB max message size (chat images are E2EE payloads)
   });
 
   // Heartbeat: force-close half-open sockets so disconnect cleanup runs reliably.
@@ -811,6 +813,17 @@ function handleChat(
 ): void {
   if (!client.channelId || !client.serverId) return;
 
+  if (!msg.ciphertext || msg.ciphertext.length > CHAT_MAX_CIPHERTEXT_B64_LENGTH) {
+    send(client.ws, {
+      type: "error",
+      code: "CHAT_TOO_LARGE",
+      message: "Chat message too large",
+    });
+    return;
+  }
+
+  const encoding = msg.encoding === "json-v1" ? "json-v1" : "text";
+
   // Always use the server-tracked channel — never trust msg.channelId
   const channelClients = getChannelClients(client.channelId);
   broadcast(channelClients, {
@@ -821,6 +834,7 @@ function handleChat(
     ciphertext: msg.ciphertext,
     iv: msg.iv,
     keyEpoch: msg.keyEpoch,
+    encoding,
     timestamp: Math.floor(Date.now() / 1000),
   });
 }
