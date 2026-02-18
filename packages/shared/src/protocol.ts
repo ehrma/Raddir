@@ -84,12 +84,15 @@ export interface ClientSetPreferredLayersMessage {
   temporalLayer?: number;
 }
 
+export type ChatPayloadEncoding = "text" | "json-v1";
+
 export interface ClientChatMessage {
   type: "chat";
   channelId: string;
   ciphertext: string;
   iv: string;
   keyEpoch: number;
+  encoding?: ChatPayloadEncoding;
 }
 
 export interface ClientE2EEMessage {
@@ -246,6 +249,7 @@ export interface ServerChatMessage {
   ciphertext: string;
   iv: string;
   keyEpoch: number;
+  encoding?: ChatPayloadEncoding;
   timestamp: number;
 }
 
